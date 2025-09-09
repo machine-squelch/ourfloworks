@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DL Very-Fire</title>
+    
+    <!-- Security Meta Tags -->
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+    <meta http-equiv="X-Frame-Options" content="DENY">
+    <meta http-equiv="X-XSS-Protection" content="1; mode=block">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    
+    <!-- Application Meta Tags -->
+    <meta name="description" content="Professional commission verification system for DL Wholesale sales representatives">
+    <meta name="author" content="Adam Gurley">
+    <meta name="copyright" content="© 2025 Adam Gurley. All Rights Reserved.">
+    <meta name="robots" content="noindex, nofollow">
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="scan-glitch-overlay"></div>
+    <div class="static-overlay"></div>
+    
+    <div id="connection-badge" class="connection-badge">
+        [SYSTEM_READY]
+    </div>
+    
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 relative z-10">
+        <header class="text-center mb-12">
+            <div class="logo-container">
+                <div class="crt-monitor" title="Commission Verification System">
+                    <div class="crt-screen">
+                        <div class="crt-burn"></div>
+                        <div class="crt-static"></div>
+                        <img src="dllogoonly.png" alt="DL" class="crt-logo" onclick="triggerMegaGlitch()" title="DL Wholesale Commission Verifier">
+                        <div style="position: absolute; top: 10%; left: 10%; width: 30%; height: 30%; background: radial-gradient(ellipse at top left, rgba(255, 255, 255, 0.1) 0%, transparent 50%); pointer-events: none; z-index: 5;"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="inline-block">
+                <h1 class="glitch text-2xl sm:text-4xl md:text-5xl lg:text-7xl text-green-400 mb-2" data-text="COMMISSION_VERIFIER">COMMISSION_VERIFIER</h1>
+                <div class="text-cyan-400 text-sm tracking-widest flicker">
+                    [VERIFICATION_PROTOCOL_ACTIVE]
+                </div>
+            </div>
+            
+            <p class="text-green-400 text-lg corrupted mt-4">DL_WHOLESALE /// COMMISSION_VALIDATION_SYSTEM</p>
+            <div id="system-info" class="mt-4 text-sm">
+                <p class="text-cyan-400">SYSTEM: <strong class="text-yellow-400 glitch" data-text="COMMISSION_AUDIT">COMMISSION_AUDIT</strong></p>
+                <p class="text-gray-500 text-xs mt-2">
+                    <span class="flicker">VERIFICATION_ENGINE_ONLINE</span> | 
+                    <span id="time" class="text-green-400"></span> |
+                    <span class="text-green-400">[READY_FOR_UPLOAD]</span>
+                </p>
+            </div>
+        </header>
+
+        <!-- Commission Structure Info -->
+        <div class="mb-8 max-w-4xl mx-auto neon-border rounded-xl p-6">
+            <h2 class="text-2xl font-bold mb-4 text-center text-cyan-400 glitch" data-text="COMMISSION_STRUCTURE">COMMISSION_STRUCTURE</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                <div class="bg-gray-900 bg-opacity-50 p-4 rounded border border-green-400">
+                    <h3 class="text-green-400 font-bold mb-2">TIER 1: $0 - $9,999</h3>
+                    <p class="text-gray-300">Repeat Purchase: <span class="text-cyan-400">2%</span></p>
+                    <p class="text-gray-300">New Product: <span class="text-cyan-400">3%</span></p>
+                    <p class="text-gray-300">State Bonus: <span class="text-yellow-400">$0</span></p>
+                </div>
+                <div class="bg-gray-900 bg-opacity-50 p-4 rounded border border-cyan-400">
+                    <h3 class="text-cyan-400 font-bold mb-2">TIER 2: $10k - $49.9k</h3>
+                    <p class="text-gray-300">Repeat Purchase: <span class="text-cyan-400">1%</span></p>
+                    <p class="text-gray-300">New Product: <span class="text-cyan-400">2%</span></p>
+                    <p class="text-gray-300">State Bonus: <span class="text-yellow-400">+$100</span></p>
+                </div>
+                <div class="bg-gray-900 bg-opacity-50 p-4 rounded border border-pink-400">
+                    <h3 class="text-pink-400 font-bold mb-2">TIER 3: $50k+</h3>
+                    <p class="text-gray-300">Repeat Purchase: <span class="text-cyan-400">0.5%</span></p>
+                    <p class="text-gray-300">New Product: <span class="text-cyan-400">1.5%</span></p>
+                    <p class="text-gray-300">State Bonus: <span class="text-yellow-400">+$300</span></p>
+                </div>
+            </div>
+            <div class="mt-4 text-center">
+                <p class="text-yellow-400 text-sm">Incentivized SKUs: <span class="text-green-400">Fixed 3%+</span></p>
+            </div>
+        </div>
+
+        <!-- File Upload Section -->
+        <div class="mb-8 max-w-lg mx-auto neon-border rounded-xl p-6">
+            <h2 class="text-2xl font-bold mb-4 text-center text-cyan-400 glitch" data-text="UPLOAD_CSV">UPLOAD_CSV</h2>
+            
+            <div id="upload-area" class="border-2 border-dashed border-green-400 rounded-lg p-8 text-center cursor-pointer hover:border-cyan-400 transition-colors">
+                <div class="mb-4">
+                    <svg class="mx-auto h-12 w-12 text-green-400" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+                        <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                </div>
+                <p class="text-green-400 mb-2">Drop your CSV file here or click to browse</p>
+                <p class="text-gray-400 text-sm">Export DETAIL tab from Google Sheets as CSV</p>
+                <input type="file" id="csv-file" accept=".csv" class="hidden">
+            </div>
+            
+            <div id="file-info" class="mt-4 hidden">
+                <div class="bg-gray-900 bg-opacity-50 p-4 rounded border border-green-400">
+                    <p class="text-green-400 text-sm">File: <span id="file-name" class="text-cyan-400"></span></p>
+                    <p class="text-green-400 text-sm">Size: <span id="file-size" class="text-cyan-400"></span></p>
+                </div>
+            </div>
+            
+            <button id="verify-btn" class="cyber-button w-full mt-4 py-3 px-4 rounded font-bold" disabled>
+                INITIATE_VERIFICATION
+            </button>
+        </div>
+
+        <!-- Loading Section -->
+        <div id="loading-section" class="hidden mb-8 max-w-lg mx-auto text-center">
+            <div class="neon-border rounded-xl p-6">
+                <div class="text-cyan-400 text-lg mb-4">PROCESSING_DATA...</div>
+                <div class="w-full bg-gray-700 rounded-full h-2">
+                    <div id="progress-bar" class="bg-green-400 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                </div>
+                <div class="text-green-400 text-sm mt-2 flicker">ANALYZING_COMMISSION_STRUCTURE</div>
+            </div>
+        </div>
+
+        <!-- Results Section -->
+        <div id="results-section" class="hidden max-w-6xl mx-auto">
+            <div class="neon-border rounded-xl p-6 mb-6">
+                <h2 class="text-2xl font-bold mb-4 text-center text-cyan-400 glitch" data-text="VERIFICATION_RESULTS">VERIFICATION_RESULTS</h2>
+                
+                <!-- Summary -->
+                <div id="summary-section" class="mb-6">
+                    <h3 class="text-xl font-bold mb-3 text-green-400">SUMMARY</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div class="bg-gray-900 bg-opacity-50 p-4 rounded border border-green-400">
+                            <p class="text-gray-300 text-sm">Total Transactions</p>
+                            <p id="total-transactions" class="text-green-400 text-xl font-bold">-</p>
+                        </div>
+                        <div class="bg-gray-900 bg-opacity-50 p-4 rounded border border-cyan-400">
+                            <p class="text-gray-300 text-sm">Total States</p>
+                            <p id="total-states" class="text-cyan-400 text-xl font-bold">-</p>
+                        </div>
+                        <div class="bg-gray-900 bg-opacity-50 p-4 rounded border border-yellow-400">
+                            <p class="text-gray-300 text-sm">Calculated Commission</p>
+                            <p id="calculated-commission" class="text-yellow-400 text-xl font-bold">-</p>
+                        </div>
+                        <div class="bg-gray-900 bg-opacity-50 p-4 rounded border border-pink-400">
+                            <p class="text-gray-300 text-sm">Verification Status</p>
+                            <p id="verification-status" class="text-pink-400 text-xl font-bold">-</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Commission Breakdown -->
+                <div id="breakdown-section" class="mb-6">
+                    <h3 class="text-xl font-bold mb-3 text-green-400">COMMISSION_BREAKDOWN</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div class="bg-gray-900 bg-opacity-50 p-4 rounded border border-green-400">
+                            <p class="text-gray-300 text-sm">Repeat Product</p>
+                            <p id="repeat-commission" class="text-green-400 text-lg font-bold">-</p>
+                        </div>
+                        <div class="bg-gray-900 bg-opacity-50 p-4 rounded border border-cyan-400">
+                            <p class="text-gray-300 text-sm">New Product</p>
+                            <p id="new-commission" class="text-cyan-400 text-lg font-bold">-</p>
+                        </div>
+                        <div class="bg-gray-900 bg-opacity-50 p-4 rounded border border-yellow-400">
+                            <p class="text-gray-300 text-sm">Incentive Product</p>
+                            <p id="incentive-commission" class="text-yellow-400 text-lg font-bold">-</p>
+                        </div>
+                        <div class="bg-gray-900 bg-opacity-50 p-4 rounded border border-pink-400">
+                            <p class="text-gray-300 text-sm">State Bonuses</p>
+                            <p id="state-bonuses" class="text-pink-400 text-lg font-bold">-</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- State Analysis -->
+                <div id="state-analysis-section" class="mb-6">
+                    <h3 class="text-xl font-bold mb-3 text-green-400">STATE_ANALYSIS</h3>
+                    <div id="state-analysis-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <!-- State analysis cards will be populated here -->
+                    </div>
+                </div>
+
+                <!-- Discrepancies -->
+                <div id="discrepancies-section" class="mb-6">
+                    <h3 class="text-xl font-bold mb-3 text-red-400">DISCREPANCIES</h3>
+                    <div id="discrepancies-content">
+                        <!-- Discrepancies will be populated here -->
+                    </div>
+                </div>
+
+                <!-- Download Report -->
+                <div class="text-center">
+                    <button id="download-btn" class="cyber-button py-3 px-6 rounded font-bold">
+                        DOWNLOAD_VERIFICATION_REPORT
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="copyright">
+        <div class="text-center py-4">
+            <p class="text-gray-400 text-sm mb-2">
+                © 2025 <strong class="text-cyan-400 footer-glitch" data-text="Adam Gurley">Adam Gurley</strong> - All <span class="footer-glitch" data-text="Rights">Rights</span> Reserved
+            </p>
+            <p class="text-gray-500 text-xs mb-2">
+                DL Wholesale <span class="footer-glitch" data-text="Commission">Commission</span> Verification System
+            </p>
+            <p class="text-gray-600 text-xs">
+                <span class="footer-glitch" data-text="Proprietary">Proprietary</span> and Confidential • Unauthorized use prohibited • <span class="footer-glitch" data-text="Protected">Protected</span> by copyright law
+            </p>
+            <div class="mt-2 text-xs text-gray-600">
+                <span class="flicker">SECURE_CONNECTION_VERIFIED</span> | 
+                <span class="text-green-400 footer-glitch" data-text="SSL_ENCRYPTED">SSL_ENCRYPTED</span> |
+                <span class="text-cyan-400">DATA_PROTECTED</span>
+            </div>
+        </div>
+    </footer>
+    
+    <script src="script.js" defer></script>
+</body>
+</html>
+

@@ -1,0 +1,26 @@
+name: dl-commission-verifier
+services:
+- name: commission-verifier
+  source_dir: .
+  github:
+    repo: your-repo/dl-commission-verifier
+    branch: main
+    deploy_on_push: true
+  run_command: npm start
+  build_command: npm install
+  environment_slug: node-js
+  instance_count: 1
+  instance_size_slug: basic-xxs
+  http_port: 8080
+  routes:
+  - path: /
+  envs:
+  - key: NODE_ENV
+    value: production
+  - key: PORT
+    value: "8080"
+domains:
+- domain: egyptiancommission.com
+  type: PRIMARY
+  zone: egyptiancommission.com
+

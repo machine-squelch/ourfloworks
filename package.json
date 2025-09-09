@@ -1,0 +1,54 @@
+{
+  "name": "dl-commission-verifier",
+  "version": "1.0.0",
+  "description": "DL Wholesale Commission Verification Web Application - Secure, Professional Commission Validation System",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "build": "echo 'No build step required'",
+    "security-audit": "npm audit",
+    "test": "echo 'Security-enhanced commission verification system'"
+  },
+  "engines": {
+    "node": ">=18.x"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "cors": "^2.8.5",
+    "multer": "^1.4.5-lts.1",
+    "csv-parser": "^3.0.0",
+    "json2csv": "^5.0.7"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  },
+  "keywords": [
+    "commission-verification",
+    "csv-upload",
+    "express",
+    "web-app",
+    "security-enhanced",
+    "dl-wholesale",
+    "financial-verification"
+  ],
+  "author": "Adam Gurley",
+  "license": "PROPRIETARY",
+  "private": true,
+  "copyright": "© 2025 Adam Gurley. All Rights Reserved.",
+  "repository": {
+    "type": "git",
+    "url": "private"
+  },
+  "security": {
+    "features": [
+      "XSS Protection",
+      "CSRF Protection", 
+      "Input Sanitization",
+      "File Upload Security",
+      "Content Security Policy",
+      "HTTP Security Headers"
+    ]
+  }
+}
+
