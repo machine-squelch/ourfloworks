@@ -641,10 +641,10 @@ body::after {
 
 /* Copyright footer with improved positioning */
 .copyright {
-    position: static; /* Changed from relative to static */
-    width: 100%;
-    padding: 20px;
-    margin-top: 40px;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;   
     color: #00ff00;
     font-size: 10px;
     font-family: 'Share Tech Mono', monospace;
