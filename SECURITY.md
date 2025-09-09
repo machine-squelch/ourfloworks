@@ -1,5 +1,5 @@
 # Security Features Documentation
-## DL Wholesale Commission Verification System
+## THinkazoo Commission Verification System
 
 ### 🔒 Security Overview
 This application implements multiple layers of security to protect sensitive commission data and prevent unauthorized access.
@@ -22,7 +22,7 @@ This application implements multiple layers of security to protect sensitive com
 - Protects against XSS and code injection attacks
 
 ### CORS Protection
-- **Production**: Restricted to `egyptiancommission.com` and `www.egyptiancommission.com`
+- **Production**: Restricted to `ourfloworks.com` and `www.ourfloworks.com`
 - **Development**: Allows localhost for testing
 - Credentials disabled for additional security
 
@@ -160,7 +160,7 @@ PORT=8080
 
 For security issues or concerns:
 - **Developer**: Adam Gurley
-- **System**: DL Wholesale Commission Verification
+- **System**: Thinkazoo Commission Verification
 - **Classification**: Proprietary and Confidential
 
 ---
