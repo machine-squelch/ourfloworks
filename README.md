@@ -1,8 +1,8 @@
-# DL Wholesale Commission Verification Web App
+# Thinkazoo Commission Verification Web App
 **© 2025 Adam Gurley - All Rights Reserved**
 
 ## Overview
-A professional, security-enhanced web application for verifying commission calculations against the official DL Wholesale commission structure. Features a modern cyber-themed interface with comprehensive verification capabilities and enterprise-level security.
+A professional, security-enhanced web application for verifying commission calculations. Features a modern cyber-themed interface with comprehensive verification capabilities and enterprise-level security.
 
 ## 🔒 Security Features
 - **HTTP Security Headers**: XSS, clickjacking, and MIME sniffing protection
@@ -47,7 +47,7 @@ PORT=8080
 ```
 
 ### Custom Domain Setup
-1. Add `egyptiancommission.com` as a custom domain
+1. Add `ourfloworks.com` as a custom domain
 2. Update DNS records to point to Digital Ocean
 3. Enable SSL certificate (automatic)
 
@@ -107,5 +107,5 @@ commission-webapp/
 For technical support or feature requests, contact the development team.
 
 ---
-© 2025 Adam Gurley - DL Wholesale Commission Verifier
+© 2025 Adam Gurley - Thinkaszoo Commission Verifier
 
