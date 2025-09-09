@@ -1,3 +1,21 @@
+/*
+ * Thinkazoo Verification System
+ * Copyright (c) 2025 Adam Gurley. All Rights Reserved.
+ * 
+ * PROPRIETARY AND CONFIDENTIAL
+ * 
+ * This software and associated documentation files (the "Software") are the 
+ * exclusive property of Adam Gurley. Unauthorized copying, distribution, 
+ * modification, reverse engineering, or use of this Software, via any medium, 
+ * is strictly prohibited without explicit written permission.
+ * 
+ * This Software is protected by copyright laws and international treaty 
+ * provisions. Violation of these terms may result in severe civil and 
+ * criminal penalties, and will be prosecuted to the maximum extent possible 
+ * under the law.
+ * 
+ * For licensing inquiries, contact: [admin@thinkazoo.com]
+ */
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
