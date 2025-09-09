@@ -1,7 +1,7 @@
 {
-  "name": "dl-commission-verifier",
+  "name": "ourfloworks",
   "version": "1.0.0",
-  "description": "DL Wholesale Commission Verification Web Application - Secure, Professional Commission Validation System",
+  "description": "Thinkazoo Commission Verification Web Application - Secure, Professional Commission Validation System",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
