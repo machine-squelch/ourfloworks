@@ -1,9 +1,9 @@
-name: dl-commission-verifier
+name: ourfloworks
 services:
-- name: commission-verifier
+- name: ourfloworks
   source_dir: .
   github:
-    repo: your-repo/dl-commission-verifier
+    repo: machine-squelch/ourfloworks
     branch: main
     deploy_on_push: true
   run_command: npm start
@@ -20,7 +20,7 @@ services:
   - key: PORT
     value: "8080"
 domains:
-- domain: egyptiancommission.com
+- domain: ourfloworks.com
   type: PRIMARY
-  zone: egyptiancommission.com
+  zone: ourfloworks.com
 
