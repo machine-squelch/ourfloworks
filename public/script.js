@@ -167,9 +167,19 @@ function handleFile(file) {
         return;
     }
     
-    // Additional MIME type validation
-    const allowedTypes = ['text/csv', 'application/csv', 'text/plain'];
-    if (file.type && !allowedTypes.includes(file.type)) {
+    // Additional MIME type validation (flexible for CSV files)
+    const allowedTypes = [
+        'text/csv', 
+        'application/csv', 
+        'text/plain',
+        'application/vnd.ms-excel',
+        'text/comma-separated-values',
+        'application/octet-stream' // Some systems use this for CSV
+    ];
+    
+    // Only validate MIME type if it's provided (some browsers don't set it for CSV)
+    if (file.type && file.type !== '' && !allowedTypes.includes(file.type)) {
+        console.log('File MIME type:', file.type); // Debug info
         showError('Invalid file type. Please select a valid CSV file.');
         return;
     }
