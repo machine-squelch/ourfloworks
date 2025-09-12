@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Thinkazoo Commission Verifier</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Thinkazoo</title>
     
     <!-- Security Meta Tags -->
     <meta http-equiv="X-Content-Type-Options" content="nosniff">
@@ -17,365 +17,207 @@
     <meta name="copyright" content="© 2025 Adam Gurley. All Rights Reserved.">
     <meta name="robots" content="noindex, nofollow">
     
-    <!-- Modern font loading with display swap -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
-    
-    <!-- Critical CSS inlined for performance -->
-    <style>
-        /* Critical path CSS - immediate loading */
-        * { box-sizing: border-box; }
-        html { font-size: 16px; }
-        body {
-            margin: 0;
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: #0a0a0a;
-            color: #ffffff;
-            overflow-x: hidden;
-            position: relative;
-        }
-        .container { max-width: 1200px; margin: 0 auto; padding: 16px; }
-        @media (min-width: 768px) { .container { padding: 32px; } }
-        @media (min-width: 1024px) { .container { padding: 40px; } }
-    </style>
-    
-    <!-- Skip link for accessibility -->
-    <a href="#main-content" class="skip-link">Skip to main content</a>
-    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- Accessibility announcements -->
-    <div aria-live="polite" aria-atomic="true" class="sr-only" id="announcements"></div>
+    <div class="scan-glitch-overlay"></div>
+    <div class="static-overlay"></div>
     
-    <!-- Background effects -->
-    <div class="background-effects">
-        <div class="scan-lines"></div>
-        <div class="grid-overlay"></div>
-        <div class="floating-particles"></div>
+    <div id="connection-badge" class="connection-badge">
+        [SYSTEM_READY]
     </div>
     
-    <!-- Status indicator -->
-    <div id="connection-status" class="status-indicator" role="status" aria-label="System status">
-        <div class="status-dot"></div>
-        <span class="status-text">SYSTEM READY</span>
-    </div>
-    
-    <div class="container">
-        <!-- Main header -->
-        <header class="hero-section" role="banner">
+    <div class="container mx-auto p-4 sm:p-6 lg:p-8 relative z-10">
+        <header class="text-center mb-12">
             <div class="logo-container">
-                <div class="crt-display">
-                    <img src="dllogoonly.png" alt="Thinkazoo Logo" class="logo" loading="eager">
-                    <div class="crt-effects"></div>
+                <div class="crt-monitor" title="Commission Verification System">
+                    <div class="crt-screen">
+                        <div class="crt-burn"></div>
+                        <div class="crt-static"></div>
+                        <img src="dllogoonly.png" alt="SKULL" class="crt-logo" onclick="triggerMegaGlitch()" title="Thinkazoo Commission Verifier">
+                        <div style="position: absolute; top: 10%; left: 10%; width: 30%; height: 30%; background: radial-gradient(ellipse at top left, rgba(255, 255, 255, 0.1) 0%, transparent 50%); pointer-events: none; z-index: 5;"></div>
+                    </div>
                 </div>
             </div>
             
-            <div class="hero-content">
-                <h1 class="hero-title">
-                    <span class="title-main">Commission</span>
-                    <span class="title-accent">Magician</span>
-                </h1>
-                <p class="hero-subtitle">Professional verification system</p>
-                <div class="system-info">
-                    <span class="info-badge">TIME PROTOCOL</span>
-                    <span class="info-time" id="current-time"></span>
+            <div class="inline-block">
+                <h1 class="glitch text-2xl sm:text-4xl md:text-5xl lg:text-7xl text-green-400 mb-2" data-text="COMMISSION_VERIFIER">COMMISSION_VERIFIER</h1>
+                <div class="text-cyan-400 text-sm tracking-widest flicker">
+                    [VERIFICATION_PROTOCOL_ACTIVE]
                 </div>
+            </div>
+            
+            <p class="text-green-400 text-lg corrupted mt-4">Thinkazoo /// ITS_A_ZOO_OUT_THERE</p>
+            <div id="system-info" class="mt-4 text-sm">
+                <p class="text-cyan-400">SYSTEM: <strong class="text-yellow-400 glitch" data-text="COMMISSION_AUDIT">COMMISSION_AUDIT</strong></p>
+                <p class="text-gray-500 text-xs mt-2">
+                    <span class="flicker">CUIDADO</span> | 
+                    <span id="time" class="text-green-400"></span> |
+                    <span class="text-green-400">[READY_FOR_UPLOAD]</span>
+                </p>
             </div>
         </header>
 
-        <!-- Main content -->
-        <main id="main-content" role="main">
-            <!-- Commission structure info -->
-            <section class="section commission-structure" aria-labelledby="structure-title">
-                <h2 id="structure-title" class="section-title">Commission Structure</h2>
-                <div class="tier-grid">
-                    <div class="tier-card tier-1">
-                        <div class="tier-header">
-                            <h3>Tier 1</h3>
-                            <span class="tier-range">$0 - $9,999</span>
-                        </div>
-                        <div class="tier-rates">
-                            <div class="rate-item">
-                                <span class="rate-label">Repeat</span>
-                                <span class="rate-value">2%</span>
-                            </div>
-                            <div class="rate-item">
-                                <span class="rate-label">New Product</span>
-                                <span class="rate-value">3%</span>
-                            </div>
-                            <div class="rate-item">
-                                <span class="rate-label">Bonus</span>
-                                <span class="rate-value">$0</span>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="tier-card tier-2">
-                        <div class="tier-header">
-                            <h3>Tier 2</h3>
-                            <span class="tier-range">$10K - $49.9K</span>
-                        </div>
-                        <div class="tier-rates">
-                            <div class="rate-item">
-                                <span class="rate-label">Repeat</span>
-                                <span class="rate-value">1%</span>
-                            </div>
-                            <div class="rate-item">
-                                <span class="rate-label">New Product</span>
-                                <span class="rate-value">2%</span>
-                            </div>
-                            <div class="rate-item">
-                                <span class="rate-label">Bonus</span>
-                                <span class="rate-value">$100</span>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="tier-card tier-3">
-                        <div class="tier-header">
-                            <h3>Tier 3</h3>
-                            <span class="tier-range">$50K+</span>
-                        </div>
-                        <div class="tier-rates">
-                            <div class="rate-item">
-                                <span class="rate-label">Repeat</span>
-                                <span class="rate-value">0.5%</span>
-                            </div>
-                            <div class="rate-item">
-                                <span class="rate-label">New Product</span>
-                                <span class="rate-value">1.5%</span>
-                            </div>
-                            <div class="rate-item">
-                                <span class="rate-label">Bonus</span>
-                                <span class="rate-value">$300</span>
-                            </div>
-                        </div>
-                    </div>
+        <!-- Commission Structure Info -->
+        <div class="mb-8 max-w-4xl mx-auto neon-border rounded-xl p-6">
+            <h2 class="text-2xl font-bold mb-4 text-center text-cyan-400 glitch" data-text="COMMISSION_STRUCTURE">COMMISSION_STRUCTURE</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                <div class="bg-gray-900 bg-opacity-50 p-4 rounded border border-green-400">
+                    <h3 class="text-green-400 font-bold mb-2">TIER 1: $0 - $9,999</h3>
+                    <p class="text-gray-300">Repeat Purchase: <span class="text-cyan-400">2%</span></p>
+                    <p class="text-gray-300">New Product: <span class="text-cyan-400">3%</span></p>
+                    <p class="text-gray-300">State Bonus: <span class="text-yellow-400">$0</span></p>
                 </div>
-                <div class="incentive-note">
-                    <span class="note-icon">⚡</span>
-                    <span>Incentivized SKUs: Fixed 3%+</span>
+                <div class="bg-gray-900 bg-opacity-50 p-4 rounded border border-cyan-400">
+                    <h3 class="text-cyan-400 font-bold mb-2">TIER 2: $10k - $49.9k</h3>
+                    <p class="text-gray-300">Repeat Purchase: <span class="text-cyan-400">1%</span></p>
+                    <p class="text-gray-300">New Product: <span class="text-cyan-400">2%</span></p>
+                    <p class="text-gray-300">State Bonus: <span class="text-yellow-400">+$100</span></p>
                 </div>
-            </section>
+                <div class="bg-gray-900 bg-opacity-50 p-4 rounded border border-pink-400">
+                    <h3 class="text-pink-400 font-bold mb-2">TIER 3: $50k+</h3>
+                    <p class="text-gray-300">Repeat Purchase: <span class="text-cyan-400">0.5%</span></p>
+                    <p class="text-gray-300">New Product: <span class="text-cyan-400">1.5%</span></p>
+                    <p class="text-gray-300">State Bonus: <span class="text-yellow-400">+$300</span></p>
+                </div>
+            </div>
+            <div class="mt-4 text-center">
+                <p class="text-yellow-400 text-sm">Incentivized SKUs: <span class="text-green-400">Fixed 3%+</span></p>
+            </div>
+        </div>
 
-            <!-- File upload section -->
-            <section class="section upload-section" aria-labelledby="upload-title">
-                <h2 id="upload-title" class="section-title">Upload Commission Data</h2>
+        <!-- File Upload Section -->
+        <div class="mb-8 max-w-lg mx-auto neon-border rounded-xl p-6">
+            <h2 class="text-2xl font-bold mb-4 text-center text-cyan-400 glitch" data-text="UPLOAD_CSV">UPLOAD_CSV</h2>
+            
+            <div id="upload-area" class="border-2 border-dashed border-green-400 rounded-lg p-8 text-center cursor-pointer hover:border-cyan-400 transition-colors">
+                <div class="mb-4">
+                    <svg class="mx-auto h-12 w-12 text-green-400" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+                        <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                </div>
+                <p class="text-green-400 mb-2">Drop your CSV file here or click to browse</p>
+                <p class="text-gray-400 text-sm">Export DETAIL tab from Google Sheets as CSV</p>
+                <input type="file" id="csv-file" accept=".csv" class="hidden">
+            </div>
+            
+            <div id="file-info" class="mt-4 hidden">
+                <div class="bg-gray-900 bg-opacity-50 p-4 rounded border border-green-400">
+                    <p class="text-green-400 text-sm">File: <span id="file-name" class="text-cyan-400"></span></p>
+                    <p class="text-green-400 text-sm">Size: <span id="file-size" class="text-cyan-400"></span></p>
+                </div>
+            </div>
+            
+            <button id="verify-btn" class="cyber-button w-full mt-4 py-3 px-4 rounded font-bold" disabled>
+                INITIATE_VERIFICATION
+            </button>
+        </div>
+
+        <!-- Loading Section -->
+        <div id="loading-section" class="hidden mb-8 max-w-lg mx-auto text-center">
+            <div class="neon-border rounded-xl p-6">
+                <div class="text-cyan-400 text-lg mb-4">PROCESSING_DATA...</div>
+                <div class="w-full bg-gray-700 rounded-full h-2">
+                    <div id="progress-bar" class="bg-green-400 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                </div>
+                <div class="text-green-400 text-sm mt-2 flicker">ANALYZING_COMMISSION_STRUCTURE</div>
+            </div>
+        </div>
+
+        <!-- Results Section -->
+        <div id="results-section" class="hidden max-w-6xl mx-auto">
+            <div class="neon-border rounded-xl p-6 mb-6">
+                <h2 class="text-2xl font-bold mb-4 text-center text-cyan-400 glitch" data-text="VERIFICATION_RESULTS">VERIFICATION_RESULTS</h2>
                 
-                <div class="upload-container">
-                    <div class="upload-dropzone" 
-                         id="dropzone" 
-                         role="button" 
-                         tabindex="0" 
-                         aria-describedby="upload-instructions"
-                         aria-label="Upload CSV file">
-                        
-                        <div class="upload-icon">
-                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                                <polyline points="7,10 12,15 17,10"/>
-                                <line x1="12" y1="15" x2="12" y2="3"/>
-                            </svg>
+                <!-- Summary -->
+                <div id="summary-section" class="mb-6">
+                    <h3 class="text-xl font-bold mb-3 text-green-400">SUMMARY</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div class="bg-gray-900 bg-opacity-50 p-4 rounded border border-green-400">
+                            <p class="text-gray-300 text-sm">Total Transactions</p>
+                            <p id="total-transactions" class="text-green-400 text-xl font-bold">-</p>
                         </div>
-                        
-                        <div class="upload-content">
-                            <h3 class="upload-title">Drop your CSV file here</h3>
-                            <p class="upload-subtitle">or click to browse</p>
-                            <div id="upload-instructions" class="upload-instructions">
-                                Export DETAIL tab from Google Sheets as CSV (Max 10MB)
-                            </div>
+                        <div class="bg-gray-900 bg-opacity-50 p-4 rounded border border-cyan-400">
+                            <p class="text-gray-300 text-sm">Total States</p>
+                            <p id="total-states" class="text-cyan-400 text-xl font-bold">-</p>
                         </div>
-                        
-                        <input type="file" 
-                               id="csv-file" 
-                               accept=".csv" 
-                               class="sr-only"
-                               aria-describedby="upload-instructions">
-                    </div>
-                    
-                    <!-- File preview -->
-                    <div id="file-preview" class="file-preview hidden" role="region" aria-label="Selected file information">
-                        <div class="file-info">
-                            <div class="file-icon">📄</div>
-                            <div class="file-details">
-                                <div class="file-name" id="file-name"></div>
-                                <div class="file-meta">
-                                    <span id="file-size"></span>
-                                    <span class="file-status" id="file-status">Ready to verify</span>
-                                </div>
-                            </div>
-                            <button class="file-remove" id="remove-file" aria-label="Remove file">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <line x1="18" y1="6" x2="6" y2="18"></line>
-                                    <line x1="6" y1="6" x2="18" y2="18"></line>
-                                </svg>
-                            </button>
+                        <div class="bg-gray-900 bg-opacity-50 p-4 rounded border border-yellow-400">
+                            <p class="text-gray-300 text-sm">Calculated Commission</p>
+                            <p id="calculated-commission" class="text-yellow-400 text-xl font-bold">-</p>
                         </div>
-                    </div>
-                    
-                    <!-- Error display -->
-                    <div id="upload-errors" class="error-container hidden" role="alert" aria-live="polite">
-                        <!-- Error messages will be inserted here -->
-                    </div>
-                    
-                    <!-- Action button -->
-                    <button id="verify-btn" 
-                            class="primary-button full-width" 
-                            disabled 
-                            aria-describedby="verify-description">
-                        <span class="button-text">Verify Commission Data</span>
-                        <span class="button-loader hidden">
-                            <svg class="spinner" width="20" height="20" viewBox="0 0 24 24">
-                                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none" opacity="0.25"/>
-                                <path d="M4,12a8,8 0 0,1 16,0" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round">
-                                    <animateTransform attributeName="transform" type="rotate" dur="1s" values="0 12 12;360 12 12" repeatCount="indefinite"/>
-                                </path>
-                            </svg>
-                        </span>
-                    </button>
-                    <div id="verify-description" class="button-description">
-                        Upload a CSV file to enable verification
-                    </div>
-                </div>
-            </section>
-
-            <!-- Progress section -->
-            <section id="progress-section" class="section progress-section hidden" aria-live="polite">
-                <div class="progress-container">
-                    <h3 class="progress-title">Processing Your Data</h3>
-                    <div class="progress-bar">
-                        <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
-                    </div>
-                    <div class="progress-stats">
-                        <span class="progress-text" id="progress-text">Initializing verification...</span>
-                        <span class="progress-percent" id="progress-percent">0%</span>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Results section -->
-            <section id="results-section" class="section results-section hidden" aria-labelledby="results-title">
-                <h2 id="results-title" class="section-title">Verification Results</h2>
-                
-                <!-- Summary cards -->
-                <div class="summary-grid">
-                    <div class="summary-card">
-                        <div class="card-icon">📊</div>
-                        <div class="card-content">
-                            <div class="card-value" id="total-transactions">-</div>
-                            <div class="card-label">Transactions</div>
-                        </div>
-                    </div>
-                    
-                    <div class="summary-card">
-                        <div class="card-icon">🗺️</div>
-                        <div class="card-content">
-                            <div class="card-value" id="total-states">-</div>
-                            <div class="card-label">States</div>
-                        </div>
-                    </div>
-                    
-                    <div class="summary-card">
-                        <div class="card-icon">💰</div>
-                        <div class="card-content">
-                            <div class="card-value" id="calculated-commission">-</div>
-                            <div class="card-label">Calculated</div>
-                        </div>
-                    </div>
-                    
-                    <div class="summary-card">
-                        <div class="card-icon">✓</div>
-                        <div class="card-content">
-                            <div class="card-value" id="verification-status">-</div>
-                            <div class="card-label">Status</div>
+                        <div class="bg-gray-900 bg-opacity-50 p-4 rounded border border-pink-400">
+                            <p class="text-gray-300 text-sm">Verification Status</p>
+                            <p id="verification-status" class="text-pink-400 text-xl font-bold">-</p>
                         </div>
                     </div>
                 </div>
 
-                <!-- Commission breakdown -->
-                <div class="breakdown-section">
-                    <h3 class="subsection-title">Commission Breakdown</h3>
-                    <div class="breakdown-grid">
-                        <div class="breakdown-item">
-                            <span class="breakdown-label">Repeat Product</span>
-                            <span class="breakdown-value" id="repeat-commission">-</span>
+                <!-- Commission Breakdown -->
+                <div id="breakdown-section" class="mb-6">
+                    <h3 class="text-xl font-bold mb-3 text-green-400">COMMISSION_BREAKDOWN</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div class="bg-gray-900 bg-opacity-50 p-4 rounded border border-green-400">
+                            <p class="text-gray-300 text-sm">Repeat Product</p>
+                            <p id="repeat-commission" class="text-green-400 text-lg font-bold">-</p>
                         </div>
-                        <div class="breakdown-item">
-                            <span class="breakdown-label">New Product</span>
-                            <span class="breakdown-value" id="new-commission">-</span>
+                        <div class="bg-gray-900 bg-opacity-50 p-4 rounded border border-cyan-400">
+                            <p class="text-gray-300 text-sm">New Product</p>
+                            <p id="new-commission" class="text-cyan-400 text-lg font-bold">-</p>
                         </div>
-                        <div class="breakdown-item">
-                            <span class="breakdown-label">Incentive Product</span>
-                            <span class="breakdown-value" id="incentive-commission">-</span>
+                        <div class="bg-gray-900 bg-opacity-50 p-4 rounded border border-yellow-400">
+                            <p class="text-gray-300 text-sm">Incentive Product</p>
+                            <p id="incentive-commission" class="text-yellow-400 text-lg font-bold">-</p>
                         </div>
-                        <div class="breakdown-item">
-                            <span class="breakdown-label">State Bonuses</span>
-                            <span class="breakdown-value" id="state-bonuses">-</span>
+                        <div class="bg-gray-900 bg-opacity-50 p-4 rounded border border-pink-400">
+                            <p class="text-gray-300 text-sm">State Bonuses</p>
+                            <p id="state-bonuses" class="text-pink-400 text-lg font-bold">-</p>
                         </div>
                     </div>
                 </div>
 
-                <!-- State analysis -->
-                <div class="state-analysis-section">
-                    <div class="collapsible-header" role="button" tabindex="0" aria-expanded="false" id="state-toggle">
-                        <h3 class="subsection-title">State Analysis</h3>
-                        <svg class="chevron-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="6,9 12,15 18,9"></polyline>
-                        </svg>
-                    </div>
-                    <div class="collapsible-content" id="state-content" aria-hidden="true">
-                        <div id="state-analysis-grid" class="state-grid">
-                            <!-- State analysis cards will be populated here -->
-                        </div>
+                <!-- State Analysis -->
+                <div id="state-analysis-section" class="mb-6">
+                    <h3 class="text-xl font-bold mb-3 text-green-400">STATE_ANALYSIS</h3>
+                    <div id="state-analysis-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <!-- State analysis cards will be populated here -->
                     </div>
                 </div>
 
                 <!-- Discrepancies -->
-                <div class="discrepancies-section">
-                    <div class="collapsible-header" role="button" tabindex="0" aria-expanded="false" id="discrepancies-toggle">
-                        <h3 class="subsection-title">Discrepancies</h3>
-                        <span class="discrepancy-count hidden" id="discrepancy-count">0</span>
-                        <svg class="chevron-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="6,9 12,15 18,9"></polyline>
-                        </svg>
-                    </div>
-                    <div class="collapsible-content" id="discrepancies-content" aria-hidden="true">
-                        <div id="discrepancies-list">
-                            <!-- Discrepancy items will be populated here -->
-                        </div>
+                <div id="discrepancies-section" class="mb-6">
+                    <h3 class="text-xl font-bold mb-3 text-red-400">DISCREPANCIES</h3>
+                    <div id="discrepancies-content">
+                        <!-- Discrepancies will be populated here -->
                     </div>
                 </div>
 
-                <!-- Download section -->
-                <div class="download-section">
-                    <button id="download-btn" class="secondary-button">
-                        <svg class="button-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-15"/>
-                            <polyline points="7,10 12,15 17,10"/>
-                            <line x1="12" y1="15" x2="12" y2="3"/>
-                        </svg>
-                        <span>Download Report</span>
+                <!-- Download Report -->
+                <div class="text-center">
+                    <button id="download-btn" class="cyber-button py-3 px-6 rounded font-bold">
+                        DOWNLOAD_VERIFICATION_REPORT
                     </button>
                 </div>
-            </section>
-        </main>
+            </div>
+        </div>
     </div>
 
-    <!-- Footer -->
-    <footer class="footer" role="contentinfo">
-        <div class="container">
-            <div class="footer-content">
-                <div class="copyright">
-                    <p>&copy; 2025 <strong>Adam Gurley</strong> - All Rights Reserved</p>
-                    <p class="footer-subtitle">Thinkazoo Commission Verification System</p>
-                </div>
-                <div class="security-badges">
-                    <span class="security-badge">🔒 Secure</span>
-                    <span class="security-badge">✓ Encrypted</span>
-                    <span class="security-badge">🛡️ Protected</span>
-                </div>
+    <footer class="copyright">
+        <div class="text-center py-4">
+            <p class="text-gray-400 text-sm mb-2">
+                © 2025 <strong class="text-cyan-400 footer-glitch" data-text="Adam Gurley">Adam Gurley</strong> - All <span class="footer-glitch" data-text="Rights">Rights</span> Reserved
+            </p>
+            <p class="text-gray-500 text-xs mb-2">
+                Thinkazoo <span class="footer-glitch" data-text="Commission">Commission</span> Verification System
+            </p>
+            <p class="text-gray-600 text-xs">
+                <span class="footer-glitch" data-text="Proprietary">Proprietary</span> and Confidential • Unauthorized use prohibited • <span class="footer-glitch" data-text="Protected">Protected</span> by copyright law
+            </p>
+            <div class="mt-2 text-xs text-gray-600">
+                <span class="flicker">SECURE_CONNECTION_VERIFIED</span> | 
+                <span class="text-green-400 footer-glitch" data-text="SSL_ENCRYPTED">SSL_ENCRYPTED</span> |
+                <span class="text-cyan-400">DATA_PROTECTED</span>
             </div>
         </div>
     </footer>
@@ -383,3 +225,4 @@
     <script src="script.js" defer></script>
 </body>
 </html>
+

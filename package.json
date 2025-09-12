@@ -14,13 +14,11 @@
     "node": ">=18.x"
   },
   "dependencies": {
-    "cors": "^2.8.5",
-    "csv-parser": "^3.0.0",
     "express": "^4.19.2",
-    "form-data": "^4.0.4",
-    "json2csv": "^5.0.7",
+    "cors": "^2.8.5",
     "multer": "^1.4.5-lts.1",
-    "node-fetch": "^2.7.0"
+    "csv-parser": "^3.0.0",
+    "json2csv": "^5.0.7"
   },
   "devDependencies": {
     "nodemon": "^3.1.0"
@@ -45,7 +43,7 @@
   "security": {
     "features": [
       "XSS Protection",
-      "CSRF Protection",
+      "CSRF Protection", 
       "Input Sanitization",
       "File Upload Security",
       "Content Security Policy",
@@ -53,3 +51,4 @@
     ]
   }
 }
+
