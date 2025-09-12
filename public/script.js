@@ -1,5 +1,5 @@
 // Modern Commission Verification Web App JavaScript
-// World-class UI with enhanced mobile experience
+// World-class UI with enhanced mobile experience + Cloudflare Turnstile
 // © 2025 Adam Gurley - All Rights Reserved
 
 'use strict';
@@ -9,6 +9,7 @@ const AppState = {
     currentFile: null,
     currentResults: null,
     isProcessing: false,
+    turnstileToken: null,
     collapsibleStates: {
         state: false,
         discrepancies: false
@@ -104,50 +105,81 @@ const Utils = {
     }
 };
 
-// Accessibility manager
-const AccessibilityManager = {
-    // Focus management for dynamic content
-    manageFocus(element) {
-        if (!element) return;
+// Turnstile Integration
+const TurnstileManager = {
+    // Turnstile success callback
+    onSuccess(token) {
+        console.log('Turnstile verification successful');
+        AppState.turnstileToken = token;
         
-        element.setAttribute('tabindex', '-1');
-        element.focus();
+        // Enable the verify button
+        const verifyBtn = document.getElementById('verify-btn');
+        if (verifyBtn && AppState.currentFile) {
+            verifyBtn.disabled = false;
+            verifyBtn.classList.remove('disabled');
+        }
         
-        const removeFocusHandler = () => {
-            element.removeAttribute('tabindex');
-            element.removeEventListener('blur', removeFocusHandler);
-        };
+        // Update button description
+        const description = document.getElementById('verify-description');
+        if (description) {
+            description.textContent = 'Security verified - Ready to process commission data';
+        }
         
-        element.addEventListener('blur', removeFocusHandler);
+        Utils.announce('Security verification completed successfully');
     },
 
-    // Keyboard navigation for custom elements
-    setupKeyboardNavigation() {
-        // Handle collapsible sections with keyboard
-        document.addEventListener('keydown', (e) => {
-            if ((e.key === 'Enter' || e.key === ' ') && 
-                e.target.hasAttribute('role') && 
-                e.target.getAttribute('role') === 'button') {
-                
-                e.preventDefault();
-                e.target.click();
-            }
-        });
+    // Turnstile error callback
+    onError(error) {
+        console.error('Turnstile verification failed:', error);
+        AppState.turnstileToken = null;
+        
+        // Keep verify button disabled
+        const verifyBtn = document.getElementById('verify-btn');
+        if (verifyBtn) {
+            verifyBtn.disabled = true;
+            verifyBtn.classList.add('disabled');
+        }
+        
+        // Show error message
+        const description = document.getElementById('verify-description');
+        if (description) {
+            description.textContent = 'Security verification failed - Please refresh and try again';
+        }
+        
+        Utils.announce('Security verification failed', 'assertive');
     },
 
-    // Update ARIA attributes
-    updateAriaAttributes(element, attributes) {
-        Object.entries(attributes).forEach(([key, value]) => {
-            element.setAttribute(key, value);
-        });
+    // Show Turnstile widget
+    show() {
+        const container = document.getElementById('turnstile-container');
+        const notice = document.getElementById('security-notice');
+        
+        if (container) {
+            container.style.display = 'flex';
+            container.setAttribute('aria-hidden', 'false');
+        }
+        if (notice) {
+            notice.style.display = 'block';
+        }
+    },
+
+    // Hide Turnstile widget
+    hide() {
+        const container = document.getElementById('turnstile-container');
+        const notice = document.getElementById('security-notice');
+        
+        if (container) {
+            container.style.display = 'none';
+            container.setAttribute('aria-hidden', 'true');
+        }
+        if (notice) {
+            notice.style.display = 'none';
+        }
     }
 };
 
-// File upload manager
+// File Upload Manager
 const FileUploadManager = {
-    allowedTypes: ['text/csv'],
-    maxFileSize: 10 * 1024 * 1024, // 10MB
-
     init() {
         const dropzone = document.getElementById('dropzone');
         const fileInput = document.getElementById('csv-file');
@@ -155,18 +187,21 @@ const FileUploadManager = {
 
         if (!dropzone || !fileInput) return;
 
-        // Event listeners
-        dropzone.addEventListener('click', () => fileInput.click());
-        dropzone.addEventListener('dragover', this.handleDragOver.bind(this));
-        dropzone.addEventListener('dragleave', this.handleDragLeave.bind(this));
-        dropzone.addEventListener('drop', this.handleDrop.bind(this));
+        // File input change handler
         fileInput.addEventListener('change', this.handleFileSelect.bind(this));
         
+        // Remove file handler
         if (removeBtn) {
             removeBtn.addEventListener('click', this.removeFile.bind(this));
         }
 
-        // Keyboard accessibility
+        // Dropzone handlers
+        dropzone.addEventListener('click', () => fileInput.click());
+        dropzone.addEventListener('dragover', this.handleDragOver.bind(this));
+        dropzone.addEventListener('dragleave', this.handleDragLeave.bind(this));
+        dropzone.addEventListener('drop', this.handleDrop.bind(this));
+
+        // Keyboard support
         dropzone.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
@@ -175,91 +210,54 @@ const FileUploadManager = {
         });
     },
 
-    handleDragOver(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        
-        const dropzone = e.currentTarget;
-        dropzone.classList.add('drag-over');
-        
-        // Update ARIA
-        AccessibilityManager.updateAriaAttributes(dropzone, {
-            'aria-describedby': 'upload-instructions',
-            'aria-expanded': 'true'
-        });
-    },
-
-    handleDragLeave(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        
-        // Only remove if leaving the dropzone completely
-        if (!e.currentTarget.contains(e.relatedTarget)) {
-            e.currentTarget.classList.remove('drag-over');
+    handleFileSelect(event) {
+        const file = event.target.files[0];
+        if (file) {
+            this.processFile(file);
         }
     },
 
-    handleDrop(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        
-        const dropzone = e.currentTarget;
-        dropzone.classList.remove('drag-over');
-        
-        const files = Array.from(e.dataTransfer.files);
-        if (files.length > 0) {
-            this.processFile(files[0]);
-        }
+    handleDragOver(event) {
+        event.preventDefault();
+        event.currentTarget.classList.add('drag-over');
     },
 
-    handleFileSelect(e) {
-        const files = Array.from(e.target.files);
+    handleDragLeave(event) {
+        event.preventDefault();
+        event.currentTarget.classList.remove('drag-over');
+    },
+
+    handleDrop(event) {
+        event.preventDefault();
+        event.currentTarget.classList.remove('drag-over');
+        
+        const files = event.dataTransfer.files;
         if (files.length > 0) {
             this.processFile(files[0]);
         }
     },
 
     processFile(file) {
-        // Clear previous errors
-        this.clearErrors();
-        
-        // Validate file
-        const validation = this.validateFile(file);
-        if (!validation.valid) {
-            this.showErrors(validation.errors);
+        // Validate file type
+        if (!file.name.toLowerCase().endsWith('.csv')) {
+            this.showError('Please select a CSV file only.');
             return;
         }
 
-        // Store file and show preview
+        // Validate file size (10MB limit)
+        if (file.size > 10 * 1024 * 1024) {
+            this.showError('File size must be less than 10MB.');
+            return;
+        }
+
         AppState.currentFile = file;
         this.showFilePreview(file);
-        this.enableVerificationButton();
+        this.clearErrors();
         
-        Utils.announce(`File ${file.name} selected and ready for verification`);
-    },
-
-    validateFile(file) {
-        const errors = [];
-
-        // Check file type
-        if (!this.allowedTypes.includes(file.type)) {
-            errors.push(`File type '${file.type}' not supported. Please use CSV files only.`);
-        }
-
-        // Check file size
-        if (file.size > this.maxFileSize) {
-            errors.push(`File size ${Utils.formatFileSize(file.size)} exceeds the ${Utils.formatFileSize(this.maxFileSize)} limit.`);
-        }
-
-        // Check if file is empty
-        if (file.size === 0) {
-            errors.push('File is empty. Please select a valid CSV file with data.');
-        }
-
-        return {
-            valid: errors.length === 0,
-            errors
-        };
+        // Show Turnstile for security verification
+        TurnstileManager.show();
+        
+        Utils.announce(`File ${file.name} selected. Please complete security verification.`);
     },
 
     showFilePreview(file) {
@@ -267,647 +265,333 @@ const FileUploadManager = {
         const fileName = document.getElementById('file-name');
         const fileSize = document.getElementById('file-size');
         
-        if (!preview || !fileName || !fileSize) return;
-
-        fileName.textContent = file.name;
-        fileSize.textContent = Utils.formatFileSize(file.size);
-        
-        preview.classList.remove('hidden');
-        preview.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        if (preview && fileName && fileSize) {
+            fileName.textContent = file.name;
+            fileSize.textContent = Utils.formatFileSize(file.size);
+            preview.classList.remove('hidden');
+        }
     },
 
     removeFile() {
         AppState.currentFile = null;
+        AppState.turnstileToken = null;
         
-        // Hide preview
         const preview = document.getElementById('file-preview');
-        if (preview) {
-            preview.classList.add('hidden');
-        }
-
-        // Clear file input
         const fileInput = document.getElementById('csv-file');
-        if (fileInput) {
-            fileInput.value = '';
-        }
-
-        // Disable verification button
-        this.disableVerificationButton();
-        
-        Utils.announce('File removed');
-    },
-
-    enableVerificationButton() {
         const verifyBtn = document.getElementById('verify-btn');
         const description = document.getElementById('verify-description');
         
-        if (verifyBtn) {
-            verifyBtn.disabled = false;
-            verifyBtn.classList.add('enabled');
-        }
-        
-        if (description) {
-            description.textContent = 'Click to verify your commission data';
-        }
-    },
-
-    disableVerificationButton() {
-        const verifyBtn = document.getElementById('verify-btn');
-        const description = document.getElementById('verify-description');
-        
+        if (preview) preview.classList.add('hidden');
+        if (fileInput) fileInput.value = '';
         if (verifyBtn) {
             verifyBtn.disabled = true;
-            verifyBtn.classList.remove('enabled');
+            verifyBtn.classList.add('disabled');
         }
-        
         if (description) {
             description.textContent = 'Upload a CSV file to enable verification';
         }
+        
+        // Hide Turnstile
+        TurnstileManager.hide();
+        
+        this.clearErrors();
+        Utils.announce('File removed');
     },
 
-    showErrors(errors) {
+    showError(message) {
         const errorContainer = document.getElementById('upload-errors');
-        if (!errorContainer || !errors.length) return;
-
-        const errorHTML = `
-            <div class="error-content">
-                <div class="error-header">
-                    <h4>Upload Error</h4>
-                    <button class="error-close" onclick="FileUploadManager.clearErrors()">×</button>
+        if (errorContainer) {
+            errorContainer.innerHTML = `
+                <div class="error-message">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="15" y1="9" x2="9" y2="15"/>
+                        <line x1="9" y1="9" x2="15" y2="15"/>
+                    </svg>
+                    <span>${message}</span>
                 </div>
-                <ul class="error-list">
-                    ${errors.map(error => `<li>${error}</li>`).join('')}
-                </ul>
-            </div>
-        `;
-
-        errorContainer.innerHTML = errorHTML;
-        errorContainer.classList.remove('hidden');
-        
-        // Announce errors
-        Utils.announce(`Upload failed: ${errors[0]}`, 'assertive');
+            `;
+            errorContainer.classList.remove('hidden');
+        }
+        Utils.announce(message, 'assertive');
     },
 
     clearErrors() {
         const errorContainer = document.getElementById('upload-errors');
         if (errorContainer) {
-            errorContainer.innerHTML = '';
             errorContainer.classList.add('hidden');
+            errorContainer.innerHTML = '';
         }
     }
 };
 
-// Progress manager
-const ProgressManager = {
-    show() {
-        const section = document.getElementById('progress-section');
-        if (section) {
-            section.classList.remove('hidden');
-            Utils.scrollToElement(section, 100);
-        }
-    },
-
-    hide() {
-        const section = document.getElementById('progress-section');
-        if (section) {
-            section.classList.add('hidden');
-        }
-    },
-
-    updateProgress(percentage, text = 'Processing...') {
-        const fill = document.getElementById('progress-fill');
-        const percentSpan = document.getElementById('progress-percent');
-        const textSpan = document.getElementById('progress-text');
-
-        if (fill) {
-            fill.style.width = `${Math.min(100, Math.max(0, percentage))}%`;
-        }
-
-        if (percentSpan) {
-            percentSpan.textContent = `${Math.round(percentage)}%`;
-        }
-
-        if (textSpan) {
-            textSpan.textContent = text;
-        }
-
-        // Announce progress milestones
-        if (percentage % 25 === 0 && percentage > 0) {
-            Utils.announce(`${percentage}% complete`);
-        }
-    },
-
-    simulate(duration = 3000) {
-        return new Promise((resolve) => {
-            let progress = 0;
-            const steps = [
-                { progress: 20, text: 'Reading CSV data...' },
-                { progress: 40, text: 'Parsing transactions...' },
-                { progress: 60, text: 'Calculating commissions...' },
-                { progress: 80, text: 'Analyzing discrepancies...' },
-                { progress: 95, text: 'Finalizing results...' },
-                { progress: 100, text: 'Complete!' }
-            ];
-
-            let currentStep = 0;
-            const stepDuration = duration / steps.length;
-
-            const updateStep = () => {
-                if (currentStep < steps.length) {
-                    const step = steps[currentStep];
-                    this.updateProgress(step.progress, step.text);
-                    currentStep++;
-                    
-                    setTimeout(updateStep, stepDuration);
-                } else {
-                    resolve();
-                }
-            };
-
-            updateStep();
-        });
-    }
-};
-
-// Results manager
-const ResultsManager = {
-    show(data) {
-        const section = document.getElementById('results-section');
-        if (!section) return;
-
-        // Store results
-        AppState.currentResults = data;
-
-        // Update summary cards with animations
-        this.updateSummaryCards(data.summary || {});
-        this.updateCommissionBreakdown(data.commission_breakdown || {});
-        this.updateStateAnalysis(data.state_analysis || []);
-        this.updateDiscrepancies(data.discrepancies || []);
-
-        // Show section
-        section.classList.remove('hidden');
-        Utils.scrollToElement(section, 100);
-
-        Utils.announce('Verification results are ready');
-    },
-
-    updateSummaryCards(summary) {
-        const cards = {
-            'total-transactions': { value: summary.total_transactions || 0, format: 'number' },
-            'total-states': { value: summary.total_states || 0, format: 'number' },
-            'calculated-commission': { value: parseFloat(summary.total_calculated_commission) || 0, format: 'currency' },
-            'verification-status': { 
-                value: summary.difference && parseFloat(summary.difference) === 0 ? '✓ Verified' : '⚠ Issues Found',
-                format: 'text'
-            }
-        };
-
-        Object.entries(cards).forEach(([id, config]) => {
-            const element = document.getElementById(id);
-            if (element) {
-                if (config.format === 'currency') {
-                    element.dataset.format = 'currency';
-                    Utils.animateNumber(element, 0, config.value, 1500);
-                } else if (config.format === 'number') {
-                    Utils.animateNumber(element, 0, config.value, 1200);
-                } else {
-                    element.textContent = config.value;
-                }
-            }
-        });
-    },
-
-    updateCommissionBreakdown(breakdown) {
-        const items = {
-            'repeat-commission': parseFloat(breakdown.repeat) || 0,
-            'new-commission': parseFloat(breakdown.new) || 0,
-            'incentive-commission': parseFloat(breakdown.incentive) || 0,
-            'state-bonuses': parseFloat(AppState.currentResults?.summary?.total_state_bonuses) || 0
-        };
-
-        Object.entries(items).forEach(([id, value]) => {
-            const element = document.getElementById(id);
-            if (element) {
-                setTimeout(() => {
-                    element.textContent = Utils.formatCurrency(value);
-                }, Math.random() * 500 + 200);
-            }
-        });
-    },
-
-    updateStateAnalysis(stateData) {
-        const grid = document.getElementById('state-analysis-grid');
-        if (!grid || !stateData.length) return;
-
-        const stateCards = stateData.map(state => `
-            <div class="state-card" data-tier="${state.tier}">
-                <div class="state-header">
-                    <h4 class="state-name">${state.state}</h4>
-                    <span class="state-tier tier-${state.tier.replace('tier', '')}">${state.tier.toUpperCase()}</span>
-                </div>
-                <div class="state-stats">
-                    <div class="stat-row">
-                        <span class="stat-label">Sales:</span>
-                        <span class="stat-value">${Utils.formatCurrency(parseFloat(state.total_sales))}</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-label">Commission:</span>
-                        <span class="stat-value">${Utils.formatCurrency(parseFloat(state.commission))}</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-label">Bonus:</span>
-                        <span class="stat-value">${Utils.formatCurrency(parseFloat(state.bonus))}</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-label">Transactions:</span>
-                        <span class="stat-value">${state.transactions}</span>
-                    </div>
-                </div>
-            </div>
-        `).join('');
-
-        grid.innerHTML = stateCards;
-
-        // Add CSS for state cards if not already present
-        this.addStateCardStyles();
-    },
-
-    updateDiscrepancies(discrepancies) {
-        const list = document.getElementById('discrepancies-list');
-        const countElement = document.getElementById('discrepancy-count');
-        
-        if (!list) return;
-
-        // Update count
-        if (countElement) {
-            countElement.textContent = discrepancies.length;
-            if (discrepancies.length > 0) {
-                countElement.classList.remove('hidden');
-            } else {
-                countElement.classList.add('hidden');
-            }
-        }
-
-        if (discrepancies.length === 0) {
-            list.innerHTML = `
-                <div class="no-discrepancies">
-                    <div class="success-icon">✅</div>
-                    <h4>No Discrepancies Found</h4>
-                    <p>All commission calculations match the expected amounts.</p>
-                </div>
-            `;
-            return;
-        }
-
-        const discrepancyItems = discrepancies.map((disc, index) => `
-            <div class="discrepancy-item" data-severity="${Math.abs(parseFloat(disc.difference)) > 10 ? 'high' : 'low'}">
-                <div class="discrepancy-header">
-                    <span class="discrepancy-invoice">Invoice: ${disc.invoice}</span>
-                    <span class="discrepancy-state">${disc.state}</span>
-                </div>
-                <div class="discrepancy-details">
-                    <div class="amount-row">
-                        <span class="amount-label">Calculated:</span>
-                        <span class="amount-value calculated">${Utils.formatCurrency(parseFloat(disc.calculated))}</span>
-                    </div>
-                    <div class="amount-row">
-                        <span class="amount-label">Reported:</span>
-                        <span class="amount-value reported">${Utils.formatCurrency(parseFloat(disc.reported))}</span>
-                    </div>
-                    <div class="amount-row difference">
-                        <span class="amount-label">Difference:</span>
-                        <span class="amount-value ${parseFloat(disc.difference) > 0 ? 'positive' : 'negative'}">
-                            ${Utils.formatCurrency(parseFloat(disc.difference))}
-                        </span>
-                    </div>
-                </div>
-            </div>
-        `).join('');
-
-        list.innerHTML = discrepancyItems;
-        this.addDiscrepancyStyles();
-    },
-
-    addStateCardStyles() {
-        if (document.getElementById('state-card-styles')) return;
-
-        const styles = `
-            <style id="state-card-styles">
-                .state-card {
-                    padding: var(--space-lg);
-                    background: var(--glass-bg);
-                    border: 1px solid var(--glass-border);
-                    border-radius: var(--border-radius);
-                    transition: all var(--transition-normal) var(--ease-out-cubic);
-                }
-                
-                .state-card:hover {
-                    transform: translateY(-2px);
-                    box-shadow: var(--glass-shadow);
-                    border-color: rgba(255, 255, 255, 0.2);
-                }
-                
-                .state-header {
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    margin-bottom: var(--space-md);
-                }
-                
-                .state-name {
-                    font-size: var(--text-lg);
-                    font-weight: 700;
-                    margin: 0;
-                    color: var(--color-neon-cyan);
-                    font-family: 'JetBrains Mono', monospace;
-                }
-                
-                .state-tier {
-                    padding: var(--space-xs) var(--space-sm);
-                    border-radius: var(--border-radius-sm);
-                    font-size: var(--text-xs);
-                    font-weight: 600;
-                    font-family: 'JetBrains Mono', monospace;
-                }
-                
-                .tier-1 {
-                    background: rgba(0, 255, 136, 0.1);
-                    border: 1px solid rgba(0, 255, 136, 0.3);
-                    color: var(--color-neon-green);
-                }
-                
-                .tier-2 {
-                    background: rgba(0, 255, 255, 0.1);
-                    border: 1px solid rgba(0, 255, 255, 0.3);
-                    color: var(--color-neon-cyan);
-                }
-                
-                .tier-3 {
-                    background: rgba(255, 0, 128, 0.1);
-                    border: 1px solid rgba(255, 0, 128, 0.3);
-                    color: var(--color-neon-pink);
-                }
-                
-                .state-stats {
-                    display: flex;
-                    flex-direction: column;
-                    gap: var(--space-sm);
-                }
-                
-                .stat-row {
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                }
-                
-                .stat-label {
-                    font-size: var(--text-sm);
-                    color: var(--color-text-secondary);
-                }
-                
-                .stat-value {
-                    font-size: var(--text-sm);
-                    font-weight: 600;
-                    color: var(--color-text-primary);
-                    font-family: 'JetBrains Mono', monospace;
-                }
-            </style>
-        `;
-
-        document.head.insertAdjacentHTML('beforeend', styles);
-    },
-
-    addDiscrepancyStyles() {
-        if (document.getElementById('discrepancy-styles')) return;
-
-        const styles = `
-            <style id="discrepancy-styles">
-                .discrepancy-item {
-                    padding: var(--space-lg);
-                    margin-bottom: var(--space-md);
-                    background: var(--glass-bg);
-                    border: 1px solid var(--glass-border);
-                    border-radius: var(--border-radius);
-                    border-left: 4px solid var(--color-warning);
-                }
-                
-                .discrepancy-item[data-severity="high"] {
-                    border-left-color: var(--color-error);
-                    background: rgba(239, 68, 68, 0.05);
-                }
-                
-                .discrepancy-header {
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    margin-bottom: var(--space-md);
-                    flex-wrap: wrap;
-                    gap: var(--space-sm);
-                }
-                
-                .discrepancy-invoice {
-                    font-weight: 600;
-                    color: var(--color-text-primary);
-                    font-family: 'JetBrains Mono', monospace;
-                }
-                
-                .discrepancy-state {
-                    background: var(--color-surface);
-                    padding: var(--space-xs) var(--space-sm);
-                    border-radius: var(--border-radius-sm);
-                    font-size: var(--text-xs);
-                    font-weight: 500;
-                    color: var(--color-text-secondary);
-                }
-                
-                .discrepancy-details {
-                    display: grid;
-                    gap: var(--space-sm);
-                }
-                
-                .amount-row {
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                }
-                
-                .amount-row.difference {
-                    border-top: 1px solid var(--glass-border);
-                    padding-top: var(--space-sm);
-                    font-weight: 600;
-                }
-                
-                .amount-label {
-                    font-size: var(--text-sm);
-                    color: var(--color-text-secondary);
-                }
-                
-                .amount-value {
-                    font-family: 'JetBrains Mono', monospace;
-                    font-weight: 600;
-                }
-                
-                .amount-value.calculated {
-                    color: var(--color-neon-green);
-                }
-                
-                .amount-value.reported {
-                    color: var(--color-neon-cyan);
-                }
-                
-                .amount-value.positive {
-                    color: var(--color-success);
-                }
-                
-                .amount-value.negative {
-                    color: var(--color-error);
-                }
-                
-                .no-discrepancies {
-                    text-align: center;
-                    padding: var(--space-2xl);
-                    color: var(--color-success);
-                }
-                
-                .success-icon {
-                    font-size: var(--text-3xl);
-                    margin-bottom: var(--space-md);
-                }
-                
-                .no-discrepancies h4 {
-                    margin: 0 0 var(--space-sm) 0;
-                    color: var(--color-success);
-                }
-                
-                .no-discrepancies p {
-                    margin: 0;
-                    color: var(--color-text-secondary);
-                }
-            </style>
-        `;
-
-        document.head.insertAdjacentHTML('beforeend', styles);
-    }
-};
-
-// Collapsible sections manager
-const CollapsibleManager = {
+// Commission Verification Manager
+const VerificationManager = {
     init() {
-        const toggles = document.querySelectorAll('[aria-expanded]');
-        toggles.forEach(toggle => {
-            toggle.addEventListener('click', this.handleToggle.bind(this));
-        });
+        const verifyBtn = document.getElementById('verify-btn');
+        if (verifyBtn) {
+            verifyBtn.addEventListener('click', this.startVerification.bind(this));
+        }
     },
 
-    handleToggle(e) {
-        const trigger = e.currentTarget;
-        const contentId = trigger.id.replace('-toggle', '-content');
-        const content = document.getElementById(contentId);
-        
-        if (!content) return;
-
-        const isExpanded = trigger.getAttribute('aria-expanded') === 'true';
-        const newState = !isExpanded;
-
-        // Update ARIA attributes
-        trigger.setAttribute('aria-expanded', newState);
-        content.setAttribute('aria-hidden', !newState);
-
-        // Update state
-        if (trigger.id === 'state-toggle') {
-            AppState.collapsibleStates.state = newState;
-        } else if (trigger.id === 'discrepancies-toggle') {
-            AppState.collapsibleStates.discrepancies = newState;
-        }
-
-        // Announce change
-        const sectionName = trigger.querySelector('.subsection-title').textContent;
-        Utils.announce(`${sectionName} ${newState ? 'expanded' : 'collapsed'}`);
-    }
-};
-
-// Commission verification handler
-const CommissionVerifier = {
-    async verify() {
+    async startVerification() {
         if (!AppState.currentFile) {
-            Utils.announce('Please select a file first', 'assertive');
+            Utils.announce('Please select a CSV file first', 'assertive');
             return;
         }
 
-        if (AppState.isProcessing) return;
+        if (!AppState.turnstileToken) {
+            Utils.announce('Please complete security verification first', 'assertive');
+            return;
+        }
 
+        AppState.isProcessing = true;
+        this.showProgress();
+        
         try {
-            AppState.isProcessing = true;
-            
-            // Update UI
-            this.updateVerifyButton(true);
-            ProgressManager.show();
-
-            // Simulate progress
-            await ProgressManager.simulate(2000);
-
-            // Prepare form data
             const formData = new FormData();
             formData.append('csvFile', AppState.currentFile);
+            formData.append('turnstileToken', AppState.turnstileToken);
 
-            // Make API call
             const response = await fetch('/verify-commission', {
                 method: 'POST',
                 body: formData
             });
 
             if (!response.ok) {
-                throw new Error(`Server error: ${response.status} ${response.statusText}`);
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Verification failed');
             }
 
             const results = await response.json();
-
-            // Hide progress and show results
-            ProgressManager.hide();
-            ResultsManager.show(results);
-
+            AppState.currentResults = results;
+            
+            this.hideProgress();
+            this.showResults(results);
+            
+            Utils.announce('Commission verification completed successfully');
+            
         } catch (error) {
-            console.error('Verification failed:', error);
-            
-            ProgressManager.hide();
-            this.showError(error.message || 'Verification failed. Please try again.');
-            
-            Utils.announce('Verification failed', 'assertive');
+            console.error('Verification error:', error);
+            this.hideProgress();
+            this.showVerificationError(error.message);
+            Utils.announce(`Verification failed: ${error.message}`, 'assertive');
         } finally {
             AppState.isProcessing = false;
-            this.updateVerifyButton(false);
         }
     },
 
-    updateVerifyButton(isLoading) {
-        const button = document.getElementById('verify-btn');
-        const buttonText = button?.querySelector('.button-text');
-        const buttonLoader = button?.querySelector('.button-loader');
+    showProgress() {
+        const progressSection = document.getElementById('progress-section');
+        const resultsSection = document.getElementById('results-section');
+        
+        if (progressSection) {
+            progressSection.classList.remove('hidden');
+            Utils.scrollToElement(progressSection, 100);
+        }
+        if (resultsSection) {
+            resultsSection.classList.add('hidden');
+        }
 
-        if (!button || !buttonText || !buttonLoader) return;
+        // Simulate progress
+        this.animateProgress();
+    },
 
-        if (isLoading) {
-            button.disabled = true;
-            buttonText.textContent = 'Verifying...';
-            buttonLoader.classList.remove('hidden');
+    animateProgress() {
+        const progressFill = document.getElementById('progress-fill');
+        const progressText = document.getElementById('progress-text');
+        const progressPercent = document.getElementById('progress-percent');
+        
+        const steps = [
+            { percent: 20, text: 'Validating file format...' },
+            { percent: 40, text: 'Processing CSV data...' },
+            { percent: 60, text: 'Calculating commissions...' },
+            { percent: 80, text: 'Analyzing discrepancies...' },
+            { percent: 100, text: 'Generating report...' }
+        ];
+
+        let currentStep = 0;
+        const stepInterval = setInterval(() => {
+            if (currentStep >= steps.length || !AppState.isProcessing) {
+                clearInterval(stepInterval);
+                return;
+            }
+
+            const step = steps[currentStep];
+            if (progressFill) progressFill.style.width = `${step.percent}%`;
+            if (progressText) progressText.textContent = step.text;
+            if (progressPercent) progressPercent.textContent = `${step.percent}%`;
+
+            currentStep++;
+        }, 800);
+    },
+
+    hideProgress() {
+        const progressSection = document.getElementById('progress-section');
+        if (progressSection) {
+            progressSection.classList.add('hidden');
+        }
+    },
+
+    showResults(results) {
+        const resultsSection = document.getElementById('results-section');
+        if (!resultsSection) return;
+
+        // Update summary cards
+        this.updateSummaryCards(results.summary);
+        
+        // Update commission breakdown
+        this.updateCommissionBreakdown(results.commission_breakdown);
+        
+        // Update state analysis table
+        this.updateStateAnalysis(results.state_analysis);
+        
+        // Update discrepancies table
+        this.updateDiscrepancies(results.discrepancies);
+        
+        // Enable download button
+        const downloadBtn = document.getElementById('download-btn');
+        if (downloadBtn) {
+            downloadBtn.disabled = false;
+            downloadBtn.classList.remove('disabled');
+        }
+
+        resultsSection.classList.remove('hidden');
+        Utils.scrollToElement(resultsSection, 100);
+    },
+
+    updateSummaryCards(summary) {
+        const elements = {
+            'total-transactions': summary.total_transactions,
+            'total-states': summary.total_states,
+            'calculated-commission': summary.total_calculated_commission,
+            'verification-status': parseFloat(summary.difference) === 0 ? 'Perfect' : 'Discrepancies Found'
+        };
+
+        Object.entries(elements).forEach(([id, value]) => {
+            const element = document.getElementById(id);
+            if (element) {
+                if (id === 'calculated-commission') {
+                    element.dataset.format = 'currency';
+                    Utils.animateNumber(element, 0, parseFloat(value) || 0);
+                } else if (typeof value === 'number') {
+                    Utils.animateNumber(element, 0, value);
+                } else {
+                    element.textContent = value;
+                }
+            }
+        });
+    },
+
+    updateCommissionBreakdown(breakdown) {
+        const elements = {
+            'repeat-commission': breakdown.repeat,
+            'new-commission': breakdown.new,
+            'incentive-commission': breakdown.incentive,
+            'state-bonuses': AppState.currentResults?.summary?.total_state_bonuses || '0.00'
+        };
+
+        Object.entries(elements).forEach(([id, value]) => {
+            const element = document.getElementById(id);
+            if (element) {
+                element.textContent = Utils.formatCurrency(parseFloat(value) || 0);
+            }
+        });
+    },
+
+    updateStateAnalysis(stateData) {
+        const tableBody = document.querySelector('#state-table tbody');
+        if (!tableBody) return;
+
+        tableBody.innerHTML = stateData.map(state => `
+            <tr>
+                <td><strong>${state.state}</strong></td>
+                <td>${Utils.formatCurrency(parseFloat(state.total_sales))}</td>
+                <td><span class="tier-badge tier-${state.tier.toLowerCase()}">${state.tier.toUpperCase()}</span></td>
+                <td>${Utils.formatCurrency(parseFloat(state.commission))}</td>
+                <td>${Utils.formatCurrency(parseFloat(state.bonus))}</td>
+                <td>${state.transactions}</td>
+            </tr>
+        `).join('');
+    },
+
+    updateDiscrepancies(discrepancies) {
+        const tableBody = document.querySelector('#discrepancies-table tbody');
+        const countElement = document.getElementById('discrepancy-count');
+        
+        if (countElement) {
+            countElement.textContent = discrepancies.length;
+        }
+
+        if (!tableBody) return;
+
+        if (discrepancies.length === 0) {
+            tableBody.innerHTML = `
+                <tr>
+                    <td colspan="5" class="no-data">
+                        <div class="no-data-content">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                                <polyline points="22,4 12,14.01 9,11.01"/>
+                            </svg>
+                            <p>No discrepancies found! All commission calculations match perfectly.</p>
+                        </div>
+                    </td>
+                </tr>
+            `;
         } else {
-            button.disabled = false;
-            buttonText.textContent = 'Verify Commission Data';
-            buttonLoader.classList.add('hidden');
+            tableBody.innerHTML = discrepancies.map(disc => {
+                const difference = parseFloat(disc.difference);
+                const diffClass = difference > 0 ? 'positive' : 'negative';
+                
+                return `
+                    <tr>
+                        <td><strong>${disc.invoice}</strong></td>
+                        <td>${disc.state}</td>
+                        <td>${Utils.formatCurrency(parseFloat(disc.calculated))}</td>
+                        <td>${Utils.formatCurrency(parseFloat(disc.reported))}</td>
+                        <td class="difference ${diffClass}">${Utils.formatCurrency(Math.abs(difference))}</td>
+                    </tr>
+                `;
+            }).join('');
         }
     },
 
-    showError(message) {
-        // You could implement a toast notification system here
-        alert(`Error: ${message}`);
+    showVerificationError(message) {
+        const resultsSection = document.getElementById('results-section');
+        if (resultsSection) {
+            resultsSection.innerHTML = `
+                <div class="error-state">
+                    <div class="error-icon">
+                        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <line x1="15" y1="9" x2="9" y2="15"/>
+                            <line x1="9" y1="9" x2="15" y2="15"/>
+                        </svg>
+                    </div>
+                    <h3>Verification Failed</h3>
+                    <p>${message}</p>
+                    <button class="secondary-button" onclick="location.reload()">Try Again</button>
+                </div>
+            `;
+            resultsSection.classList.remove('hidden');
+            Utils.scrollToElement(resultsSection, 100);
+        }
     }
 };
 
-// Download manager
-const DownloadManager = {
+// Report Download Manager
+const ReportManager = {
+    init() {
+        const downloadBtn = document.getElementById('download-btn');
+        if (downloadBtn) {
+            downloadBtn.addEventListener('click', this.downloadReport.bind(this));
+        }
+    },
+
     async downloadReport() {
         if (!AppState.currentResults) {
-            Utils.announce('No results to download', 'assertive');
+            Utils.announce('No report data available', 'assertive');
             return;
         }
 
@@ -915,21 +599,20 @@ const DownloadManager = {
             const response = await fetch('/download-report', {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
                 },
-                body: JSON.stringify(AppState.currentResults)
+                body: JSON.stringify({ reportData: AppState.currentResults })
             });
 
             if (!response.ok) {
                 throw new Error('Failed to generate report');
             }
 
-            // Create download link
             const blob = await response.blob();
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `commission_verification_${new Date().toISOString().split('T')[0]}.csv`;
+            a.download = `commission_verification_report_${new Date().toISOString().slice(0, 10)}.csv`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
@@ -938,9 +621,46 @@ const DownloadManager = {
             Utils.announce('Report downloaded successfully');
 
         } catch (error) {
-            console.error('Download failed:', error);
-            Utils.announce('Download failed', 'assertive');
+            console.error('Download error:', error);
+            Utils.announce('Failed to download report', 'assertive');
         }
+    }
+};
+
+// Collapsible sections manager
+const CollapsibleManager = {
+    init() {
+        const headers = document.querySelectorAll('.collapsible-header');
+        headers.forEach(header => {
+            header.addEventListener('click', this.toggleSection.bind(this));
+            header.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    this.toggleSection(e);
+                }
+            });
+        });
+    },
+
+    toggleSection(event) {
+        const header = event.currentTarget;
+        const content = header.nextElementSibling;
+        const icon = header.querySelector('.collapsible-icon svg');
+        const isExpanded = header.getAttribute('aria-expanded') === 'true';
+
+        header.setAttribute('aria-expanded', !isExpanded);
+        
+        if (content) {
+            content.style.maxHeight = isExpanded ? '0' : content.scrollHeight + 'px';
+        }
+        
+        if (icon) {
+            icon.style.transform = isExpanded ? 'rotate(0deg)' : 'rotate(180deg)';
+        }
+
+        // Update state
+        const sectionId = header.id.replace('-header', '');
+        AppState.collapsibleStates[sectionId] = !isExpanded;
     }
 };
 
@@ -948,14 +668,14 @@ const DownloadManager = {
 const TimeManager = {
     init() {
         this.updateTime();
-        setInterval(() => this.updateTime(), 1000);
+        setInterval(this.updateTime, 1000);
     },
 
     updateTime() {
         const timeElement = document.getElementById('current-time');
         if (timeElement) {
             const now = new Date();
-            const timeString = now.toLocaleTimeString('en-US', {
+            const timeString = now.toLocaleTimeString('en-US', { 
                 hour12: false,
                 hour: '2-digit',
                 minute: '2-digit',
@@ -966,135 +686,22 @@ const TimeManager = {
     }
 };
 
-// Application initialization
-class App {
-    constructor() {
-        this.init();
-    }
-
-    init() {
-        // Wait for DOM to be ready
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => this.onDOMReady());
-        } else {
-            this.onDOMReady();
-        }
-    }
-
-    onDOMReady() {
-        // Initialize managers
-        FileUploadManager.init();
-        CollapsibleManager.init();
-        TimeManager.init();
-        AccessibilityManager.setupKeyboardNavigation();
-
-        // Event listeners
-        this.setupEventListeners();
-
-        // Security and copyright notice
-        this.setupSecurityNotices();
-
-        // Clean up on page unload
-        this.setupCleanup();
-
-        Utils.announce('Application ready');
-    }
-
-    setupEventListeners() {
-        // Verify button
-        const verifyBtn = document.getElementById('verify-btn');
-        if (verifyBtn) {
-            verifyBtn.addEventListener('click', () => CommissionVerifier.verify());
-        }
-
-        // Download button
-        const downloadBtn = document.getElementById('download-btn');
-        if (downloadBtn) {
-            downloadBtn.addEventListener('click', () => DownloadManager.downloadReport());
-        }
-
-        // Logo click for fun effect
-        const logo = document.querySelector('.crt-display');
-        if (logo) {
-            logo.addEventListener('click', this.triggerLogoEffect.bind(this));
-        }
-    }
-
-    setupSecurityNotices() {
-        // Console security message
-        console.log('%c© 2025 Adam Gurley - All Rights Reserved', 
-            'color: #00ffff; font-size: 16px; font-weight: bold;');
-        console.log('%cThinkazoo Commission Verification System', 
-            'color: #00ff88; font-size: 12px;');
-        console.log('%cUnauthorized access or modification is prohibited.', 
-            'color: #ff0080; font-size: 12px;');
-    }
-
-    setupCleanup() {
-        window.addEventListener('beforeunload', () => {
-            // Clear sensitive data
-            if (AppState.currentFile) {
-                AppState.currentFile = null;
-            }
-            if (AppState.currentResults) {
-                AppState.currentResults = null;
-            }
-        });
-    }
-
-    triggerLogoEffect() {
-        const logo = document.querySelector('.crt-display');
-        if (!logo) return;
-
-        logo.style.animation = 'none';
-        setTimeout(() => {
-            logo.style.animation = 'logoGlitch 0.5s ease-in-out';
-        }, 10);
-
-        // Add temporary glitch effect
-        logo.classList.add('mega-glitch');
-        setTimeout(() => {
-            logo.classList.remove('mega-glitch');
-        }, 500);
-
-        Utils.announce('System diagnostic complete');
-    }
-}
-
-// Add some additional glitch effect styles
-const glitchStyles = `
-    <style id="glitch-effects">
-        @keyframes logoGlitch {
-            0%, 100% { transform: scale(1) rotate(0deg); }
-            20% { transform: scale(1.1) rotate(-2deg); }
-            40% { transform: scale(0.9) rotate(1deg); }
-            60% { transform: scale(1.05) rotate(-1deg); }
-            80% { transform: scale(0.95) rotate(2deg); }
-        }
-        
-        .mega-glitch {
-            animation: logoGlitch 0.5s ease-in-out !important;
-        }
-        
-        .mega-glitch::after {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: linear-gradient(90deg, transparent, rgba(0, 255, 255, 0.3), transparent);
-            animation: glitchSweep 0.5s ease-in-out;
-        }
-        
-        @keyframes glitchSweep {
-            0% { transform: translateX(-100%); }
-            100% { transform: translateX(100%); }
-        }
-    </style>
-`;
-
-document.head.insertAdjacentHTML('beforeend', glitchStyles);
+// Global Turnstile callbacks (required by Cloudflare)
+window.onTurnstileSuccess = TurnstileManager.onSuccess.bind(TurnstileManager);
+window.onTurnstileError = TurnstileManager.onError.bind(TurnstileManager);
 
 // Initialize application
-const app = new App();
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('Commission Verification App initializing...');
+    
+    // Initialize all managers
+    FileUploadManager.init();
+    VerificationManager.init();
+    ReportManager.init();
+    CollapsibleManager.init();
+    TimeManager.init();
+    
+    console.log('Commission Verification App initialized successfully');
+    Utils.announce('Commission verification system ready');
+});
+

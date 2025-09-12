@@ -9,6 +9,9 @@ const { Parser } = require('json2csv');
 const app = express();
 const PORT = process.env.PORT || 8080;
 
+// Cloudflare Turnstile Secret Key - 0x4AAAAAAB03pmsFUE9ifRlL
+const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || '0x4AAAAAAB03pmsFUE9ifRlL';
+
 // Basic middleware
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -30,6 +33,26 @@ const upload = multer({
         }
     }
 });
+
+// Cloudflare Turnstile verification function
+async function verifyTurnstileToken(token) {
+    try {
+        const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: `secret=${TURNSTILE_SECRET_KEY}&response=${token}`
+        });
+        
+        const result = await response.json();
+        console.log('Turnstile verification result:', result);
+        return result.success;
+    } catch (error) {
+        console.error('Turnstile verification error:', error);
+        return false;
+    }
+}
 
 // Commission Verification Class
 class CommissionVerifier {
@@ -75,6 +98,7 @@ class CommissionVerifier {
             return null;
         }
 
+        // Updated column mapping to match actual CSV structure
         const CORE_FIELDS = {
             customer_no: findColumnName(['CustomerNo', 'Customer #']),
             ship_to_state: findColumnName(['ShipToState', 'State']),
@@ -86,12 +110,21 @@ class CommissionVerifier {
             salesperson: findColumnName(['Salesperson_Name', 'Salesperson', 'SalesPersonName']),
             reported_commission: findColumnName(['Total_Calculated_Commission_Amount', 'ReportedCommission']),
             line_discount: findColumnName(['Line_Discount_Amt', 'LineDiscount', 'Discount']),
-            total_discounted_sales: findColumnName(['TotalDiscountedRevenue', 'SalesAmount'])
+            total_discounted_sales: findColumnName(['Total Discounted Revenue', 'TotalDiscountedRevenue', 'SalesAmount'])
         };
         
-        const isRepeatProductCol = findColumnName(['RepeatProductCommission', 'IsRepeatProduct']);
-        const isNewProductCol = findColumnName(['NewProductCommission', 'IsNewProduct']);
-        const isIncentiveCol = findColumnName(['IncentiveProductCommission', 'IsIncentive']);
+        // Updated boolean field mapping - these are commission amounts, not boolean flags
+        const repeatCommissionCol = findColumnName(['Repeat Product Commission', 'RepeatProductCommission', 'IsRepeatProduct']);
+        const newCommissionCol = findColumnName(['New Product Commission', 'NewProductCommission', 'IsNewProduct']);
+        const incentiveCommissionCol = findColumnName(['Incentive Product Commission', 'IncentiveProductCommission', 'IsIncentive']);
+
+        console.log('Column mappings found:');
+        console.log('Core fields:', CORE_FIELDS);
+        console.log('Commission fields:', {
+            repeat: repeatCommissionCol,
+            new: newCommissionCol,
+            incentive: incentiveCommissionCol
+        });
 
         for (let i = 0; i < csvData.length; i++) {
             const row = csvData[i];
@@ -114,6 +147,24 @@ class CommissionVerifier {
                 }
 
                 if (shipToState && salesAmount > 0) {
+                    // Determine product type based on which commission field has a value
+                    const repeatCommission = parseFloat(row[repeatCommissionCol] || 0);
+                    const newCommission = parseFloat(row[newCommissionCol] || 0);
+                    const incentiveCommission = parseFloat(row[incentiveCommissionCol] || 0);
+                    
+                    let isRepeat = false;
+                    let isNew = false;
+                    let isIncentive = false;
+                    
+                    // Logic: if a commission field has a value > 0, that's the product type
+                    if (incentiveCommission > 0) {
+                        isIncentive = true;
+                    } else if (newCommission > 0) {
+                        isNew = true;
+                    } else if (repeatCommission > 0) {
+                        isRepeat = true;
+                    }
+
                     const transaction = {
                         customer_no: row[CORE_FIELDS.customer_no] || '',
                         ship_to_state: shipToState,
@@ -125,9 +176,9 @@ class CommissionVerifier {
                         total_discounted_sales: salesAmount,
                         salesperson: row[CORE_FIELDS.salesperson] || '',
                         line_discount: parseFloat(row[CORE_FIELDS.line_discount] || 0),
-                        is_repeat_product: this.parseBooleanField(row[isRepeatProductCol]),
-                        is_new_product: this.parseBooleanField(row[isNewProductCol]),
-                        is_incentive: this.parseBooleanField(row[isIncentiveCol]),
+                        is_repeat_product: isRepeat,
+                        is_new_product: isNew,
+                        is_incentive: isIncentive,
                         reported_commission: parseFloat(row[CORE_FIELDS.reported_commission] || 0)
                     };
 
@@ -140,6 +191,7 @@ class CommissionVerifier {
         }
 
         console.log('Processed', transactions.length, 'valid transactions');
+        console.log('State totals:', state_totals);
 
         if (transactions.length === 0) {
             return this.getEmptyResults();
@@ -278,9 +330,31 @@ class CommissionVerifier {
     }
 }
 
-// File upload route
+// File upload route with Turnstile verification
 app.post('/verify-commission', upload.single('csvFile'), async (req, res) => {
     try {
+        // Verify Turnstile token first
+        const turnstileToken = req.body.turnstileToken;
+        
+        if (!turnstileToken) {
+            return res.status(400).json({ 
+                error: 'Security verification required',
+                details: 'Turnstile token missing'
+            });
+        }
+        
+        console.log('Verifying Turnstile token...');
+        const isValidToken = await verifyTurnstileToken(turnstileToken);
+        
+        if (!isValidToken) {
+            return res.status(400).json({ 
+                error: 'Security verification failed',
+                details: 'Invalid Turnstile token'
+            });
+        }
+        
+        console.log('Turnstile verification successful');
+
         if (!req.file) {
             return res.status(400).json({ error: 'No file uploaded' });
         }
@@ -314,6 +388,7 @@ app.post('/verify-commission', upload.single('csvFile'), async (req, res) => {
         if (req.file && fs.existsSync(req.file.path)) {
             fs.unlinkSync(req.file.path);
         }
+        
         // Check for file type error from Multer
         if (error.message === 'File type not supported. Please upload CSV files only.') {
             return res.status(415).json({ error: error.message });
@@ -403,4 +478,6 @@ app.post('/download-report', (req, res) => {
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Commission Verification Server running on port ${PORT}`);
     console.log(`Access the application at: http://localhost:${PORT}`);
+    console.log(`Turnstile Secret Key configured: ${TURNSTILE_SECRET_KEY !== 'YOUR-SECRET-KEY-HERE' ? 'Yes' : 'No - Please add your secret key'}`);
 });
+

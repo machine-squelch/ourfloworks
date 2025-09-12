@@ -22,6 +22,9 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
     
+    <!-- Cloudflare Turnstile -->
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+    
     <!-- Critical CSS inlined for performance -->
     <style>
         /* Critical path CSS - immediate loading */
@@ -38,6 +41,49 @@
         .container { max-width: 1200px; margin: 0 auto; padding: 16px; }
         @media (min-width: 768px) { .container { padding: 32px; } }
         @media (min-width: 1024px) { .container { padding: 40px; } }
+        
+        /* Turnstile styling */
+        .turnstile-container {
+            display: flex;
+            justify-content: center;
+            margin: 20px 0;
+            padding: 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .security-notice {
+            text-align: center;
+            font-size: 0.875rem;
+            color: rgba(255, 255, 255, 0.7);
+            margin-top: 8px;
+        }
+        
+        /* Footer banner styling */
+        .footer-banner {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-top: 24px;
+            padding-top: 24px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .footer-banner a {
+            display: block;
+            transition: transform 0.3s ease, opacity 0.3s ease;
+        }
+        
+        .footer-banner a:hover {
+            transform: scale(1.05);
+            opacity: 0.9;
+        }
+        
+        .footer-banner img {
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
     </style>
     
     <!-- Skip link for accessibility -->
@@ -49,47 +95,58 @@
     <!-- Accessibility announcements -->
     <div aria-live="polite" aria-atomic="true" class="sr-only" id="announcements"></div>
     
-    <!-- Background effects -->
-    <div class="background-effects">
-        <div class="scan-lines"></div>
-        <div class="grid-overlay"></div>
-        <div class="floating-particles"></div>
-    </div>
+    <!-- Background pattern -->
+    <div class="background-pattern" aria-hidden="true"></div>
     
-    <!-- Status indicator -->
-    <div id="connection-status" class="status-indicator" role="status" aria-label="System status">
-        <div class="status-dot"></div>
-        <span class="status-text">SYSTEM READY</span>
-    </div>
-    
+    <!-- Main container -->
     <div class="container">
-        <!-- Main header -->
-        <header class="hero-section" role="banner">
-            <div class="logo-container">
-                <div class="crt-display">
-                    <img src="dllogoonly.png" alt="Thinkazoo Logo" class="logo" loading="eager">
-                    <div class="crt-effects"></div>
+        <!-- Header -->
+        <header class="header" role="banner">
+            <div class="brand-container">
+                <div class="brand-icon">
+                    <div class="robot-icon">
+                        <div class="robot-head">
+                            <div class="robot-eyes">
+                                <div class="robot-eye"></div>
+                                <div class="robot-eye"></div>
+                            </div>
+                            <div class="robot-antenna"></div>
+                        </div>
+                        <div class="robot-body">
+                            <div class="robot-chest"></div>
+                            <div class="robot-arms">
+                                <div class="robot-arm left"></div>
+                                <div class="robot-arm right"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="brand-text">
+                    <h1 class="brand-title">
+                        <span class="title-main">COMMISSION</span>
+                        <span class="title-sub">MAGICIAN</span>
+                    </h1>
+                    <p class="brand-subtitle">Professional verification system</p>
                 </div>
             </div>
             
-            <div class="hero-content">
-                <h1 class="hero-title">
-                    <span class="title-main">Commission</span>
-                    <span class="title-accent">Magician</span>
-                </h1>
-                <p class="hero-subtitle">Professional verification system</p>
-                <div class="system-info">
-                    <span class="info-badge">TIME PROTOCOL</span>
-                    <span class="info-time" id="current-time"></span>
-                </div>
+            <div class="status-indicator">
+                <div class="status-dot"></div>
+                <span class="status-text">SYSTEM READY</span>
+            </div>
+            
+            <div class="time-display">
+                <span class="time-label">TIME PROTOCOL</span>
+                <span class="time-value" id="current-time">16:54:37</span>
             </div>
         </header>
 
         <!-- Main content -->
         <main id="main-content" role="main">
-            <!-- Commission structure info -->
+            <!-- Commission structure section -->
             <section class="section commission-structure" aria-labelledby="structure-title">
-                <h2 id="structure-title" class="section-title">Commission Structure</h2>
+                <h2 id="structure-title" class="section-title">COMMISSION STRUCTURE</h2>
+                
                 <div class="tier-grid">
                     <div class="tier-card tier-1">
                         <div class="tier-header">
@@ -220,6 +277,21 @@
                         <!-- Error messages will be inserted here -->
                     </div>
                     
+                    <!-- CLOUDFLARE TURNSTILE - OPTION 1: Before Upload Button -->
+                    <div class="turnstile-container" id="turnstile-container" style="display: none;">
+                        <div class="cf-turnstile" 
+                             data-sitekey="0x4AAAAAAB03pmsFUE9ifRlL" 
+                             data-size="compact" 
+                             data-theme="dark" 
+                             data-language="en"
+                             data-callback="onTurnstileSuccess"
+                             data-error-callback="onTurnstileError">
+                        </div>
+                    </div>
+                    <div class="security-notice" id="security-notice" style="display: none;">
+                        🔒 Security verification required before processing sensitive commission data
+                    </div>
+                    
                     <!-- Action button -->
                     <button id="verify-btn" 
                             class="primary-button full-width" 
@@ -318,68 +390,152 @@
                 </div>
 
                 <!-- State analysis -->
-                <div class="state-analysis-section">
-                    <div class="collapsible-header" role="button" tabindex="0" aria-expanded="false" id="state-toggle">
+                <div class="analysis-section">
+                    <div class="collapsible-header" id="state-header" role="button" tabindex="0" aria-expanded="false" aria-controls="state-content">
                         <h3 class="subsection-title">State Analysis</h3>
-                        <svg class="chevron-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="6,9 12,15 18,9"></polyline>
-                        </svg>
+                        <div class="collapsible-icon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="6,9 12,15 18,9"></polyline>
+                            </svg>
+                        </div>
                     </div>
-                    <div class="collapsible-content" id="state-content" aria-hidden="true">
-                        <div id="state-analysis-grid" class="state-grid">
-                            <!-- State analysis cards will be populated here -->
+                    <div class="collapsible-content" id="state-content" aria-labelledby="state-header">
+                        <div class="table-container">
+                            <table class="results-table" id="state-table">
+                                <thead>
+                                    <tr>
+                                        <th>State</th>
+                                        <th>Total Sales</th>
+                                        <th>Tier</th>
+                                        <th>Commission</th>
+                                        <th>Bonus</th>
+                                        <th>Transactions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- State data will be inserted here -->
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 </div>
 
                 <!-- Discrepancies -->
-                <div class="discrepancies-section">
-                    <div class="collapsible-header" role="button" tabindex="0" aria-expanded="false" id="discrepancies-toggle">
+                <div class="analysis-section">
+                    <div class="collapsible-header" id="discrepancies-header" role="button" tabindex="0" aria-expanded="false" aria-controls="discrepancies-content">
                         <h3 class="subsection-title">Discrepancies</h3>
-                        <span class="discrepancy-count hidden" id="discrepancy-count">0</span>
-                        <svg class="chevron-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="6,9 12,15 18,9"></polyline>
-                        </svg>
+                        <div class="discrepancy-count" id="discrepancy-count">0</div>
+                        <div class="collapsible-icon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="6,9 12,15 18,9"></polyline>
+                            </svg>
+                        </div>
                     </div>
-                    <div class="collapsible-content" id="discrepancies-content" aria-hidden="true">
-                        <div id="discrepancies-list">
-                            <!-- Discrepancy items will be populated here -->
+                    <div class="collapsible-content" id="discrepancies-content" aria-labelledby="discrepancies-header">
+                        <div class="table-container">
+                            <table class="results-table" id="discrepancies-table">
+                                <thead>
+                                    <tr>
+                                        <th>Invoice</th>
+                                        <th>State</th>
+                                        <th>Calculated</th>
+                                        <th>Reported</th>
+                                        <th>Difference</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Discrepancy data will be inserted here -->
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 </div>
 
                 <!-- Download section -->
                 <div class="download-section">
-                    <button id="download-btn" class="secondary-button">
-                        <svg class="button-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-15"/>
-                            <polyline points="7,10 12,15 17,10"/>
-                            <line x1="12" y1="15" x2="12" y2="3"/>
-                        </svg>
-                        <span>Download Report</span>
+                    <button id="download-btn" class="secondary-button full-width" disabled>
+                        <span class="button-text">Download Detailed Report</span>
+                        <span class="button-icon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-15"/>
+                                <polyline points="7,10 12,15 17,10"/>
+                                <line x1="12" y1="15" x2="12" y2="3"/>
+                            </svg>
+                        </span>
                     </button>
                 </div>
             </section>
         </main>
-    </div>
 
-    <!-- Footer -->
-    <footer class="footer" role="contentinfo">
-        <div class="container">
+        <!-- Footer -->
+        <footer class="footer" role="contentinfo">
             <div class="footer-content">
-                <div class="copyright">
-                    <p>&copy; 2025 <strong>Adam Gurley</strong> - All Rights Reserved</p>
-                    <p class="footer-subtitle">Thinkazoo Commission Verification System</p>
+                <div class="footer-brand">
+                    <span class="footer-title">Thinkazoo Commission Verifier</span>
+                    <span class="footer-version">v2.1.0</span>
                 </div>
-                <div class="security-badges">
-                    <span class="security-badge">🔒 Secure</span>
-                    <span class="security-badge">✓ Encrypted</span>
-                    <span class="security-badge">🛡️ Protected</span>
+                <div class="footer-meta">
+                    <span class="footer-copyright">© 2025 Adam Gurley. All Rights Reserved.</span>
+                    <span class="footer-security">🔒 Enterprise Security</span>
                 </div>
             </div>
-        </div>
-    </footer>
+            
+            <!-- Sticker Mule Banner -->
+            <div class="footer-banner">
+                <a href="https://www.stickermule.com/unlock?ref_id=7471996701&utm_medium=embed&utm_source=invite&utm_content=250x250" target="_blank">
+                    <img alt="Custom Stickers, Die Cut Stickers, Bumper Stickers - Sticker Mule" 
+                         height="250" 
+                         src="https://cdn.stickermule.com/content/core/assets/banners/stickermule-invite-friends-square.png" 
+                         width="250" />
+                </a>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Scripts -->
+    <script src="script.js"></script>
     
-    <script src="script.js" defer></script>
+    <!-- Turnstile Integration Script -->
+    <script>
+        // Turnstile callback functions
+        window.onTurnstileSuccess = function(token) {
+            console.log('Turnstile verification successful');
+            // Enable the verify button
+            const verifyBtn = document.getElementById('verify-btn');
+            verifyBtn.disabled = false;
+            verifyBtn.setAttribute('data-turnstile-token', token);
+            
+            // Update button description
+            const description = document.getElementById('verify-description');
+            description.textContent = 'Security verified - Ready to process commission data';
+        };
+        
+        window.onTurnstileError = function(error) {
+            console.error('Turnstile verification failed:', error);
+            // Keep verify button disabled
+            const verifyBtn = document.getElementById('verify-btn');
+            verifyBtn.disabled = true;
+            
+            // Show error message
+            const description = document.getElementById('verify-description');
+            description.textContent = 'Security verification failed - Please refresh and try again';
+        };
+        
+        // Show Turnstile when file is uploaded
+        document.addEventListener('DOMContentLoaded', function() {
+            const fileInput = document.getElementById('csv-file');
+            const turnstileContainer = document.getElementById('turnstile-container');
+            const securityNotice = document.getElementById('security-notice');
+            
+            fileInput.addEventListener('change', function() {
+                if (this.files.length > 0) {
+                    // Show Turnstile when file is selected
+                    turnstileContainer.style.display = 'flex';
+                    securityNotice.style.display = 'block';
+                }
+            });
+        });
+    </script>
 </body>
 </html>
+
