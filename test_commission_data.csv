@@ -1,0 +1,3 @@
+CustomerNo,ShipToState,InvoiceNo,ItemCode,TransactionDate,QuantityShipped,UnitPrice,Salesperson_Name,Total_Calculated_Commission_Amount,Line_Discount_Amt,Total Discounted Revenue,Repeat Product Commission,New Product Commission,Incentive Product Commission
+12345,CA,INV001,ITEM001,2024-01-15,10,25.00,John Smith,15.00,0,250.00,15.00,0,0
+12346,TX,INV002,ITEM002,2024-01-16,5,50.00,Jane Doe,7.50,0,250.00,0,7.50,0

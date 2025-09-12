@@ -7,10 +7,10 @@ services:
     branch: main
     deploy_on_push: true
   run_command: npm start
-  build_command: npm install
+  build_command: npm install && mkdir -p uploads
   environment_slug: node-js
   instance_count: 1
-  instance_size_slug: basic-xxs
+  instance_size_slug: basic-xs
   http_port: 8080
   routes:
   - path: /
@@ -19,6 +19,13 @@ services:
     value: production
   - key: PORT
     value: "8080"
+  health_check:
+    http_path: /health
+    initial_delay_seconds: 60
+    period_seconds: 10
+    timeout_seconds: 5
+    success_threshold: 1
+    failure_threshold: 3
 domains:
 - domain: ourfloworks.com
   type: PRIMARY

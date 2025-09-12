@@ -1,4 +1,3 @@
-// server.js
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
@@ -6,69 +5,47 @@ const csv = require('csv-parser');
 const fs = require('fs');
 const path = require('path');
 const { Parser } = require('json2csv');
-const PDFDocument = require('pdfkit');
-const { finished } = require('stream/promises');
 
-// --- Configuration and Security Setup ---
+// Create uploads directory if it doesn't exist (DigitalOcean fix)
+const uploadsDir = './uploads';
+if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+    console.log('Created uploads directory');
+}
+
 const app = express();
 const PORT = process.env.PORT || 8080;
-const UPLOAD_DIR = 'uploads/';
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB as per security specs
 
-// Set up security headers
-app.use((req, res, next) => {
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('X-XSS-Protection', '1; mode=block');
-    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-    next();
-});
-
-// Configure CORS
-const corsOptions = {
-    origin: process.env.NODE_ENV === 'production' 
-        ? ['https://ourfloworks.com', 'https://www.ourfloworks.com'] 
-        : '*',
-    credentials: false
-};
-app.use(cors(corsOptions));
-
-// Basic middleware for body parsing and serving static files
+// Basic middleware
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
+app.use(cors());
 app.use(express.static('public'));
 
-// Multer configuration for file uploads
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        if (!fs.existsSync(UPLOAD_DIR)) {
-            fs.mkdirSync(UPLOAD_DIR);
-        }
-        cb(null, UPLOAD_DIR);
-    },
-    filename: (req, file, cb) => {
-        const sanitizedFilename = path.basename(file.originalname);
-        cb(null, `${Date.now()}-${sanitizedFilename}`);
+// Health check endpoint for DigitalOcean
+app.get('/health', (req, res) => {
+    res.status(200).json({ 
+        status: 'healthy', 
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        version: '1.0.0'
+    });
+});
+
+// Root endpoint
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Simple multer configuration - accept all files
+const upload = multer({ 
+    dest: 'uploads/',
+    limits: {
+        fileSize: 10 * 1024 * 1024 // 10MB
     }
 });
 
-const upload = multer({
-    storage: storage,
-    limits: { fileSize: MAX_FILE_SIZE },
-    fileFilter: (req, file, cb) => {
-        if (file.mimetype === 'text/csv' || file.originalname.endsWith('.csv')) {
-            cb(null, true);
-        } else {
-            cb(new Error('Invalid file type. Only CSV files are allowed.'), false);
-        }
-    }
-});
-
-/**
- * @class CommissionVerifier
- * @description Core business logic for commission verification.
- */
+// Commission Verification Class
 class CommissionVerifier {
     constructor() {
         this.commissionRates = {
@@ -77,122 +54,168 @@ class CommissionVerifier {
             tier3: { repeat: 0.005, new: 0.015, bonus: 300 }
         };
         this.incentiveRate = 0.03;
-        this.CORE_FIELDS = {
+    }
+
+    parseBooleanField(value) {
+        if (!value) return false;
+        const str = String(value).toLowerCase().trim();
+        return str === 'true' || str === '1' || str === 'yes' || parseFloat(str) > 0;
+    }
+
+    async verifyCommissionData(csvData) {
+        const transactions = [];
+        const state_totals = {};
+        
+        console.log('Processing', csvData.length, 'rows');
+        
+        if (csvData.length === 0) {
+            return this.getEmptyResults();
+        }
+        
+        // Log first row structure
+        console.log('CSV columns:', Object.keys(csvData[0]));
+        
+        // CORE COLUMNS ONLY - ignore all extra columns
+        const CORE_FIELDS = {
             customer_no: 'CustomerNo',
-            ship_to_state: 'ShipToState',
+            ship_to_state: 'ShipToState', 
             invoice_no: 'InvoiceNo',
             item_code: 'ItemCode',
             transaction_date: 'TransactionDate',
             quantity: 'QuantityShipped',
             unit_price: 'UnitPrice',
             salesperson: 'Salesperson_Name',
-            reported_commission: 'Total_Calculated_Commission_Amount',
             line_discount: 'Line_Discount_Amt',
+            // These fields may or may not exist - handle gracefully
             total_discounted_sales: 'Total Discounted Revenue',
             is_repeat_product: 'Repeat Product Commission',
-            is_new_product: 'New Product Commission',
+            is_new_product: 'New Product Commission', 
             is_incentive: 'Incentive Product Commission'
         };
-    }
-
-    /**
-     * Parses a boolean-like value from a string.
-     * @param {*} value
-     * @returns {boolean}
-     */
-    parseBooleanField(value) {
-        if (typeof value === 'boolean') return value;
-        if (!value) return false;
-        const str = String(value).toLowerCase().trim();
-        return str === 'true' || str === '1' || str === 'yes' || parseFloat(str) > 0;
-    }
-
-    /**
-     * Safely retrieves a field value from a row, handling potential missing keys.
-     * @param {Object} row
-     * @param {string} fieldName
-     * @returns {*}
-     */
-    getField(row, fieldName) {
-        const value = row[fieldName];
-        return (value !== undefined && value !== null && value !== '') ? value : null;
-    }
-
-    /**
-     * Calculates the commission for a single transaction.
-     * @param {Object} transaction
-     * @param {string} tier
-     * @returns {number}
-     */
-    calculateTransactionCommission(transaction, tier) {
-        const rates = this.commissionRates[tier];
-        if (this.parseBooleanField(transaction.is_incentive)) {
-            return transaction.total_discounted_sales * this.incentiveRate;
-        } else if (this.parseBooleanField(transaction.is_new_product)) {
-            return transaction.total_discounted_sales * rates.new;
-        } else {
-            return transaction.total_discounted_sales * rates.repeat;
+        
+        // Multiple possible field names for reported commission
+        const POSSIBLE_REPORTED_FIELDS = [
+            'Total_Calculated_Commission_Amount',
+            'Reported_Commission',
+            'Original_Commission',
+            'System_Commission',
+            'Sage_Commission',
+            'Commission_Amount',
+            'Calculated_Commission'
+        ];
+        
+        // Simple field getter that only looks for exact matches
+        function getField(row, fieldName) {
+            return row.hasOwnProperty(fieldName) && row[fieldName] !== undefined && row[fieldName] !== null && row[fieldName] !== '' 
+                ? row[fieldName] 
+                : null;
         }
-    }
-
-    /**
-     * Determines the commission tier based on total sales for a state.
-     * @param {number} totalSales
-     * @returns {string}
-     */
-    getStateTier(totalSales) {
-        if (totalSales >= 50000) return 'tier3';
-        if (totalSales >= 10000) return 'tier2';
-        return 'tier1';
-    }
-
-    /**
-     * Verifies commission data from a stream of CSV rows.
-     * @param {Array<Object>} csvData
-     * @returns {Promise<Object>}
-     */
-    async verifyCommissionData(csvData) {
-        if (csvData.length === 0) {
-            return this.getEmptyResults();
+        
+        // Get reported commission from multiple possible field names
+        function getReportedCommission(row) {
+            for (const fieldName of POSSIBLE_REPORTED_FIELDS) {
+                const value = getField(row, fieldName);
+                if (value !== null && value !== undefined && value !== '') {
+                    const numValue = parseFloat(value);
+                    if (!isNaN(numValue)) {
+                        return numValue;
+                    }
+                }
+            }
+            return 0;
         }
-
-        const transactions = [];
-        const state_totals = {};
+        
+        // Improved product type detection with fallback logic
+        const determineProductType = (row) => {
+            // Try boolean fields first
+            if (this.parseBooleanField(getField(row, CORE_FIELDS.is_incentive))) return 'incentive';
+            if (this.parseBooleanField(getField(row, CORE_FIELDS.is_new_product))) return 'new';
+            if (this.parseBooleanField(getField(row, CORE_FIELDS.is_repeat_product))) return 'repeat';
+            
+            // Fallback: check commission amounts in these fields
+            const incentiveComm = parseFloat(getField(row, CORE_FIELDS.is_incentive) || 0);
+            const newComm = parseFloat(getField(row, CORE_FIELDS.is_new_product) || 0);
+            const repeatComm = parseFloat(getField(row, CORE_FIELDS.is_repeat_product) || 0);
+            
+            if (incentiveComm > 0) return 'incentive';
+            if (newComm > 0) return 'new';
+            if (repeatComm > 0) return 'repeat';
+            
+            // Default to repeat if unclear
+            return 'repeat';
+        };
         
         for (let i = 0; i < csvData.length; i++) {
             const row = csvData[i];
             
             try {
+                // Extract ONLY core fields
+                const shipToState = getField(row, CORE_FIELDS.ship_to_state);
+                const customerNo = getField(row, CORE_FIELDS.customer_no);
+                const invoiceNo = getField(row, CORE_FIELDS.invoice_no);
+                
+                // Calculate sales amount - try multiple approaches
                 let salesAmount = 0;
-                const totalDiscountedRevenue = this.getField(row, this.CORE_FIELDS.total_discounted_sales);
+                
+                // Method 1: Use Total Discounted Revenue if available
+                const totalDiscountedRevenue = getField(row, CORE_FIELDS.total_discounted_sales);
                 if (totalDiscountedRevenue) {
                     salesAmount = parseFloat(totalDiscountedRevenue) || 0;
                 } else {
-                    const quantity = parseFloat(this.getField(row, this.CORE_FIELDS.quantity) || 0);
-                    const unitPrice = parseFloat(this.getField(row, this.CORE_FIELDS.unit_price) || 0);
-                    const lineDiscount = parseFloat(this.getField(row, this.CORE_FIELDS.line_discount) || 0);
+                    // Method 2: Calculate from quantity * unit price - line discount
+                    const quantity = parseFloat(getField(row, CORE_FIELDS.quantity) || 0);
+                    const unitPrice = parseFloat(getField(row, CORE_FIELDS.unit_price) || 0);
+                    const lineDiscount = parseFloat(getField(row, CORE_FIELDS.line_discount) || 0);
+                    
                     salesAmount = (quantity * unitPrice) - lineDiscount;
                 }
-
-                const shipToState = this.getField(row, this.CORE_FIELDS.ship_to_state);
                 
+                // Log first few rows for debugging
+                if (i < 3) {
+                    console.log(`Row ${i + 1}:`);
+                    console.log('  State:', shipToState);
+                    console.log('  Customer:', customerNo);
+                    console.log('  Invoice:', invoiceNo);
+                    console.log('  Sales Amount:', salesAmount);
+                }
+                
+                // Only process rows with valid state and positive sales amount
                 if (shipToState && salesAmount > 0) {
+                    const productType = determineProductType(row);
+                    const reportedCommission = getReportedCommission(row);
+                    
+                    // Enhanced logging for first few rows
+                    if (i < 3) {
+                        console.log('  Product Type:', productType);
+                        console.log('  Reported Commission:', reportedCommission);
+                        console.log('  Available commission fields:');
+                        POSSIBLE_REPORTED_FIELDS.forEach(field => {
+                            const value = getField(row, field);
+                            if (value !== null) {
+                                console.log(`    ${field}: ${value}`);
+                            }
+                        });
+                    }
+                    
                     const transaction = {
-                        customer_no: this.getField(row, this.CORE_FIELDS.customer_no) || '',
+                        customer_no: customerNo || '',
                         ship_to_state: shipToState,
-                        invoice_no: this.getField(row, this.CORE_FIELDS.invoice_no) || '',
-                        item_code: this.getField(row, this.CORE_FIELDS.item_code) || '',
-                        transaction_date: this.getField(row, this.CORE_FIELDS.transaction_date) || '',
-                        quantity: parseFloat(this.getField(row, this.CORE_FIELDS.quantity) || 0),
-                        unit_price: parseFloat(this.getField(row, this.CORE_FIELDS.unit_price) || 0),
+                        invoice_no: invoiceNo || '',
+                        item_code: getField(row, CORE_FIELDS.item_code) || '',
+                        transaction_date: getField(row, CORE_FIELDS.transaction_date) || '',
+                        quantity: parseFloat(getField(row, CORE_FIELDS.quantity) || 0),
+                        unit_price: parseFloat(getField(row, CORE_FIELDS.unit_price) || 0),
                         total_discounted_sales: salesAmount,
-                        salesperson: this.getField(row, this.CORE_FIELDS.salesperson) || '',
-                        line_discount: parseFloat(this.getField(row, this.CORE_FIELDS.line_discount) || 0),
-                        is_repeat_product: this.parseBooleanField(this.getField(row, this.CORE_FIELDS.is_repeat_product)),
-                        is_new_product: this.parseBooleanField(this.getField(row, this.CORE_FIELDS.is_new_product)),
-                        is_incentive: this.parseBooleanField(this.getField(row, this.CORE_FIELDS.is_incentive)),
-                        reported_commission: parseFloat(this.getField(row, this.CORE_FIELDS.reported_commission) || 0)
+                        salesperson: getField(row, CORE_FIELDS.salesperson) || '',
+                        line_discount: parseFloat(getField(row, CORE_FIELDS.line_discount) || 0),
+                        // Use improved product type detection
+                        product_type: productType,
+                        is_repeat_product: productType === 'repeat',
+                        is_new_product: productType === 'new',
+                        is_incentive: productType === 'incentive',
+                        reported_commission: reportedCommission
                     };
+                    
                     transactions.push(transaction);
                     state_totals[shipToState] = (state_totals[shipToState] || 0) + salesAmount;
                 }
@@ -201,45 +224,81 @@ class CommissionVerifier {
             }
         }
         
+        console.log('Processed', transactions.length, 'valid transactions');
+        
+        if (transactions.length === 0) {
+            return this.getEmptyResults();
+        }
+        
         return this.calculateVerificationResults(transactions, state_totals);
     }
-
-    /**
-     * Calculates the final verification report based on processed transactions.
-     * @param {Array<Object>} transactions
-     * @param {Object} state_totals
-     * @returns {Object}
-     */
+    
+    getEmptyResults() {
+        return {
+            summary: {
+                total_transactions: 0,
+                total_states: 0,
+                total_calculated_commission: 0,
+                total_reported_commission: 0,
+                difference: 0,
+                total_state_bonuses: 0
+            },
+            commission_breakdown: {
+                'repeat': 0,
+                'new': 0,
+                'incentive': 0
+            },
+            state_analysis: [],
+            discrepancies: [],
+            commission_structure: {
+                tier1: 'Tier 1 ($0-$9,999): Repeat 2%, New Product 3%',
+                tier2: 'Tier 2 ($10k-$49.9k): Repeat 1%, New Product 2% + $100 bonus',
+                tier3: 'Tier 3 ($50k+): Repeat 0.5%, New Product 1.5% + $300 bonus',
+                incentive: 'Incentivized SKUs: Fixed 3%+'
+            }
+        };
+    }
+    
     calculateVerificationResults(transactions, state_totals) {
         let total_calculated_commission = 0;
         let total_reported_commission = 0;
         let total_state_bonuses = 0;
         
-        const commission_breakdown = { 'repeat': 0, 'new': 0, 'incentive': 0 };
+        const commission_breakdown = {
+            'repeat': 0,
+            'new': 0,
+            'incentive': 0
+        };
+        
         const state_analysis = [];
         const discrepancies = [];
         
+        // Process each state
         for (const [state, total_sales] of Object.entries(state_totals)) {
             const tier = this.getStateTier(total_sales);
             const rates = this.commissionRates[tier];
             
-            let state_calculated_commission = 0;
-            let state_reported_commission = 0;
+            let state_commission = 0;
+            let state_reported = 0;
+            
             const state_transactions = transactions.filter(t => t.ship_to_state === state);
             
             for (const transaction of state_transactions) {
-                const commission = this.calculateTransactionCommission(transaction, tier);
+                let commission = 0;
                 
-                if (this.parseBooleanField(transaction.is_incentive)) {
+                if (transaction.is_incentive) {
+                    commission = transaction.total_discounted_sales * this.incentiveRate;
                     commission_breakdown.incentive += commission;
-                } else if (this.parseBooleanField(transaction.is_new_product)) {
+                } else if (transaction.is_new_product) {
+                    commission = transaction.total_discounted_sales * rates.new;
                     commission_breakdown.new += commission;
                 } else {
+                    commission = transaction.total_discounted_sales * rates.repeat;
                     commission_breakdown.repeat += commission;
                 }
                 
-                state_calculated_commission += commission;
-                state_reported_commission += transaction.reported_commission;
+                state_commission += commission;
+                state_reported += transaction.reported_commission;
                 
                 const diff = Math.abs(commission - transaction.reported_commission);
                 if (diff > 0.01) {
@@ -260,14 +319,14 @@ class CommissionVerifier {
                 state: state,
                 total_sales: total_sales.toFixed(2),
                 tier: tier,
-                calculated_commission: state_calculated_commission.toFixed(2),
-                reported_commission: state_reported_commission.toFixed(2),
+                commission: state_commission.toFixed(2),
+                reported: state_reported.toFixed(2),
                 bonus: state_bonus.toFixed(2),
                 transactions: state_transactions.length
             });
             
-            total_calculated_commission += state_calculated_commission;
-            total_reported_commission += state_reported_commission;
+            total_calculated_commission += state_commission;
+            total_reported_commission += state_reported;
         }
         
         total_calculated_commission += total_state_bonuses;
@@ -296,146 +355,27 @@ class CommissionVerifier {
             }
         };
     }
-
-    /**
-     * Returns an empty results object for when no data is processed.
-     * @returns {Object}
-     */
-    getEmptyResults() {
-        return {
-            summary: {
-                total_transactions: 0,
-                total_states: 0,
-                total_calculated_commission: 0,
-                total_reported_commission: 0,
-                difference: 0,
-                total_state_bonuses: 0
-            },
-            commission_breakdown: {
-                'repeat': 0,
-                'new': 0,
-                'incentive': 0
-            },
-            state_analysis: [],
-            discrepancies: [],
-            commission_structure: {
-                tier1: 'Tier 1 ($0-$9,999): Repeat 2%, New Product 3%',
-                tier2: 'Tier 2 ($10k-$49.9k): Repeat 1%, New Product 2% + $100 bonus',
-                tier3: 'Tier 3 ($50k+): Repeat 0.5%, New Product 1.5% + $300 bonus',
-                incentive: 'Incentivized SKUs: Fixed 3%+'
-            }
-        };
+    
+    getStateTier(totalSales) {
+        if (totalSales >= 50000) return 'tier3';
+        if (totalSales >= 10000) return 'tier2';
+        return 'tier1';
     }
 }
 
-/**
- * Generates a professional PDF report from the verification data.
- * @param {Object} reportData
- * @param {Object} res - Express response object
- */
-function generatePdfReport(reportData, res) {
-    const doc = new PDFDocument();
-    
-    // Set headers for PDF download
-    const filename = `commission_verification_report_${new Date().toISOString().replace(/[:.]/g, '-')}.pdf`;
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-
-    // Pipe the document to the response stream
-    doc.pipe(res);
-
-    // --- Report Content ---
-    doc.fontSize(20).text('Commission Verification Report', { align: 'center' });
-    doc.moveDown();
-    
-    // Summary
-    doc.fontSize(16).text('Summary');
-    doc.fontSize(12);
-    doc.text(`Total Transactions: ${reportData.summary.total_transactions}`);
-    doc.text(`Total States: ${reportData.summary.total_states}`);
-    doc.text(`Calculated Commission: $${reportData.summary.total_calculated_commission}`);
-    doc.text(`Reported Commission: $${reportData.summary.total_reported_commission}`);
-    doc.text(`Difference: $${reportData.summary.difference}`);
-    doc.text(`Total State Bonuses: $${reportData.summary.total_state_bonuses}`);
-    doc.moveDown();
-
-    // Commission Breakdown
-    doc.fontSize(16).text('Commission Breakdown');
-    doc.fontSize(12);
-    doc.text(`Repeat Product Commission: $${reportData.commission_breakdown.repeat}`);
-    doc.text(`New Product Commission: $${reportData.commission_breakdown.new}`);
-    doc.text(`Incentive Product Commission: $${reportData.commission_breakdown.incentive}`);
-    doc.moveDown();
-    
-    // State Analysis
-    doc.fontSize(16).text('State Analysis');
-    doc.fontSize(12);
-    const tableTop = doc.y;
-    const itemHeight = 20;
-    const tableLeft = 50;
-
-    const headers = ['State', 'Total Sales', 'Tier', 'Calculated', 'Reported', 'Bonus'];
-    doc.font('Helvetica-Bold');
-    headers.forEach((header, i) => {
-        doc.text(header, tableLeft + (i * 90), tableTop, { width: 80, align: 'left' });
-    });
-    doc.moveDown();
-    doc.font('Helvetica');
-    
-    let currentY = doc.y;
-    reportData.state_analysis.forEach(state => {
-        currentY += itemHeight;
-        doc.text(state.state, tableLeft, currentY, { width: 80, align: 'left' });
-        doc.text(`$${state.total_sales}`, tableLeft + 90, currentY, { width: 80, align: 'left' });
-        doc.text(state.tier, tableLeft + 180, currentY, { width: 80, align: 'left' });
-        doc.text(`$${state.calculated_commission}`, tableLeft + 270, currentY, { width: 80, align: 'left' });
-        doc.text(`$${state.reported_commission}`, tableLeft + 360, currentY, { width: 80, align: 'left' });
-        doc.text(`$${state.bonus}`, tableLeft + 450, currentY, { width: 80, align: 'left' });
-    });
-
-    doc.moveDown(2);
-
-    // Discrepancies
-    doc.fontSize(16).text('Discrepancies');
-    doc.fontSize(12);
-    if (reportData.discrepancies.length > 0) {
-        const discTableTop = doc.y;
-        const discHeaders = ['Invoice', 'State', 'Calculated', 'Reported', 'Difference'];
-        doc.font('Helvetica-Bold');
-        discHeaders.forEach((header, i) => {
-            doc.text(header, tableLeft + (i * 100), discTableTop, { width: 80, align: 'left' });
-        });
-        doc.moveDown();
-        doc.font('Helvetica');
-
-        let discY = doc.y;
-        reportData.discrepancies.forEach(disc => {
-            discY += itemHeight;
-            doc.text(disc.invoice, tableLeft, discY, { width: 80, align: 'left' });
-            doc.text(disc.state, tableLeft + 100, discY, { width: 80, align: 'left' });
-            doc.text(`$${disc.calculated}`, tableLeft + 200, discY, { width: 80, align: 'left' });
-            doc.text(`$${disc.reported}`, tableLeft + 300, discY, { width: 80, align: 'left' });
-            doc.text(`$${disc.difference}`, tableLeft + 400, discY, { width: 80, align: 'left' });
-        });
-    } else {
-        doc.text('No discrepancies found.');
-    }
-
-    doc.end();
-}
-
-// --- API Endpoints ---
-const verifier = new CommissionVerifier();
-
+// File upload route
 app.post('/verify-commission', upload.single('csvFile'), async (req, res) => {
     try {
         if (!req.file) {
-            return res.status(400).json({ error: 'No file uploaded.' });
+            return res.status(400).json({ error: 'No file uploaded' });
         }
 
-        const filePath = req.file.path;
-        const csvData = [];
+        console.log('Processing file:', req.file.originalname);
         
+        const csvData = [];
+        const filePath = req.file.path;
+        
+        // Parse CSV
         await new Promise((resolve, reject) => {
             fs.createReadStream(filePath)
                 .pipe(csv())
@@ -443,43 +383,31 @@ app.post('/verify-commission', upload.single('csvFile'), async (req, res) => {
                 .on('end', resolve)
                 .on('error', reject);
         });
-
-        fs.unlink(filePath, (err) => {
-            if (err) console.error('Failed to delete temporary file:', err);
-        });
         
+        // Clean up uploaded file
+        fs.unlinkSync(filePath);
+        
+        // Verify commission data
+        const verifier = new CommissionVerifier();
         const results = await verifier.verifyCommissionData(csvData);
+        
         res.json(results);
         
     } catch (error) {
         console.error('Verification error:', error);
         
         if (req.file && fs.existsSync(req.file.path)) {
-            fs.unlink(req.file.path, (err) => {
-                if (err) console.error('Failed to delete file on error:', err);
-            });
+            fs.unlinkSync(req.file.path);
         }
         
-        res.status(500).json({
-            error: 'Failed to process file.',
-            details: error.message
+        res.status(500).json({ 
+            error: 'Failed to process file', 
+            details: error.message 
         });
     }
 });
 
-app.post('/download-pdf-report', (req, res) => {
-    try {
-        const { reportData } = req.body;
-        if (!reportData) {
-            return res.status(400).json({ error: 'No report data provided' });
-        }
-        generatePdfReport(reportData, res);
-    } catch (error) {
-        console.error('PDF generation error:', error);
-        res.status(500).json({ error: 'Failed to generate PDF report' });
-    }
-});
-
+// Download report route
 app.post('/download-report', (req, res) => {
     try {
         const { reportData } = req.body;
@@ -488,39 +416,57 @@ app.post('/download-report', (req, res) => {
             return res.status(400).json({ error: 'No report data provided' });
         }
         
-        const csvFields = ['Invoice', 'State', 'Calculated', 'Reported', 'Difference'];
-        const json2csvParser = new Parser({ fields: csvFields });
-
-        const formattedReport = [];
-        formattedReport.push({ Invoice: 'COMMISSION VERIFICATION REPORT', State: '', Calculated: '', Reported: '', Difference: '' });
-        formattedReport.push({ Invoice: 'Generated:', State: new Date().toISOString(), Calculated: '', Reported: '', Difference: '' });
-        formattedReport.push({ Invoice: '', State: '', Calculated: '', Reported: '', Difference: '' });
+        const reportRows = [];
         
-        formattedReport.push({ Invoice: 'SUMMARY', State: '', Calculated: '', Reported: '', Difference: '' });
-        formattedReport.push({ Invoice: 'Total Transactions:', State: reportData.summary.total_transactions, Calculated: '', Reported: '', Difference: '' });
-        formattedReport.push({ Invoice: 'Total States:', State: reportData.summary.total_states, Calculated: '', Reported: '', Difference: '' });
-        formattedReport.push({ Invoice: 'Calculated Commission:', State: `$${reportData.summary.total_calculated_commission}`, Calculated: '', Reported: '', Difference: '' });
-        formattedReport.push({ Invoice: 'Reported Commission:', State: `$${reportData.summary.total_reported_commission}`, Calculated: '', Reported: '', Difference: '' });
-        formattedReport.push({ Invoice: 'Difference:', State: `$${reportData.summary.difference}`, Calculated: '', Reported: '', Difference: '' });
-        formattedReport.push({ Invoice: 'Total State Bonuses:', State: `$${reportData.summary.total_state_bonuses}`, Calculated: '', Reported: '', Difference: '' });
-        formattedReport.push({ Invoice: '', State: '', Calculated: '', Reported: '', Difference: '' });
+        reportRows.push(['COMMISSION VERIFICATION REPORT']);
+        reportRows.push(['Generated:', new Date().toISOString()]);
+        reportRows.push([]);
         
-        formattedReport.push({ Invoice: 'DISCREPANCIES', State: '', Calculated: '', Reported: '', Difference: '' });
+        reportRows.push(['SUMMARY']);
+        reportRows.push(['Total Transactions:', reportData.summary.total_transactions]);
+        reportRows.push(['Total States:', reportData.summary.total_states]);
+        reportRows.push(['Calculated Commission:', '$' + reportData.summary.total_calculated_commission]);
+        reportRows.push(['Reported Commission:', '$' + reportData.summary.total_reported_commission]);
+        reportRows.push(['Difference:', '$' + reportData.summary.difference]);
+        reportRows.push(['State Bonuses:', '$' + reportData.summary.total_state_bonuses]);
+        reportRows.push([]);
+        
+        reportRows.push(['STATE ANALYSIS']);
+        reportRows.push(['State', 'Total Sales', 'Tier', 'Commission', 'Reported', 'Bonus', 'Transactions']);
+        
+        reportData.state_analysis.forEach(state => {
+            reportRows.push([
+                state.state,
+                '$' + state.total_sales,
+                state.tier,
+                '$' + state.commission,
+                '$' + state.reported,
+                '$' + state.bonus,
+                state.transactions
+            ]);
+        });
+        
+        reportRows.push([]);
+        
+        reportRows.push(['DISCREPANCIES']);
         if (reportData.discrepancies.length > 0) {
+            reportRows.push(['Invoice', 'State', 'Calculated', 'Reported', 'Difference']);
             reportData.discrepancies.forEach(disc => {
-                formattedReport.push({
-                    Invoice: disc.invoice,
-                    State: disc.state,
-                    Calculated: `$${disc.calculated}`,
-                    Reported: `$${disc.reported}`,
-                    Difference: `$${disc.difference}`
-                });
+                reportRows.push([
+                    disc.invoice,
+                    disc.state,
+                    '$' + disc.calculated,
+                    '$' + disc.reported,
+                    '$' + disc.difference
+                ]);
             });
         } else {
-            formattedReport.push({ Invoice: 'No discrepancies found', State: '', Calculated: '', Reported: '', Difference: '' });
+            reportRows.push(['No discrepancies found']);
         }
         
-        const csvContent = json2csvParser.parse(formattedReport);
+        const csvContent = reportRows.map(row => 
+            row.map(cell => `"${cell}"`).join(',')
+        ).join('\n');
         
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
         const filename = `commission_verification_report_${timestamp}.csv`;
@@ -528,15 +474,15 @@ app.post('/download-report', (req, res) => {
         res.setHeader('Content-Type', 'text/csv');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         res.send(csvContent);
-
+        
     } catch (error) {
         console.error('Download error:', error);
         res.status(500).json({ error: 'Failed to generate report' });
     }
 });
 
-// --- Server Startup ---
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Commission Verification Server running on port ${PORT}`);
     console.log(`Access the application at: http://localhost:${PORT}`);
 });
+

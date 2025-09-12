@@ -1,238 +1,402 @@
-// script.js
-document.addEventListener('DOMContentLoaded', () => {
-    const fileDropArea = document.getElementById('file-drop-area');
-    const fileInput = document.getElementById('file-input');
-    const resultsContainer = document.getElementById('results-container');
-    const downloadReportBtn = document.getElementById('download-report-btn');
-    const downloadPdfBtn = document.getElementById('download-pdf-btn');
-    const downloadButtons = document.querySelector('.download-buttons');
-    const loadingOverlay = document.getElementById('loading-overlay');
+// Application State Management
+const AppState = {
+    currentFile: null,
+    isProcessing: false,
+    results: null
+};
 
-    let verificationResults = null;
+// Utility Functions
+const Utils = {
+    formatFileSize(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    },
 
-    // Prevent default drag behaviors
-    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-        fileDropArea.addEventListener(eventName, preventDefaults, false);
-    });
+    formatCurrency(amount) {
+        return new Intl.NumberFormat('en-US', {
+            style: 'currency',
+            currency: 'USD'
+        }).format(amount);
+    },
 
-    function preventDefaults(e) {
-        e.preventDefault();
-        e.stopPropagation();
+    announce(message, priority = 'polite') {
+        const announcer = document.createElement('div');
+        announcer.setAttribute('aria-live', priority);
+        announcer.setAttribute('aria-atomic', 'true');
+        announcer.className = 'sr-only';
+        announcer.textContent = message;
+        document.body.appendChild(announcer);
+        setTimeout(() => document.body.removeChild(announcer), 1000);
+    },
+
+    scrollToElement(elementId) {
+        const element = document.getElementById(elementId);
+        if (!element) return;
+        
+        const headerHeight = 80;
+        const elementPosition = element.getBoundingClientRect().top;
+        const offsetPosition = elementPosition + window.pageYOffset - headerHeight;
+
+        window.scrollTo({
+            top: offsetPosition,
+            behavior: 'smooth'
+        });
     }
+};
 
-    // Highlight drop area when item is dragged over it
-    ['dragenter', 'dragover'].forEach(eventName => {
-        fileDropArea.addEventListener(eventName, () => fileDropArea.classList.add('highlight'), false);
-    });
+// File Upload Manager
+const FileUploadManager = {
+    init() {
+        const dropzone = document.getElementById('dropzone');
+        const fileInput = document.getElementById('csv-file');
+        const removeBtn = document.getElementById('remove-file');
 
-    ['dragleave', 'drop'].forEach(eventName => {
-        fileDropArea.addEventListener(eventName, () => fileDropArea.classList.remove('highlight'), false);
-    });
+        if (!dropzone || !fileInput) return;
 
-    // Handle dropped files
-    fileDropArea.addEventListener('drop', handleDrop, false);
+        // File input change handler
+        fileInput.addEventListener('change', this.handleFileSelect.bind(this));
+        
+        // Remove file handler
+        if (removeBtn) {
+            removeBtn.addEventListener('click', this.removeFile.bind(this));
+        }
 
-    function handleDrop(e) {
-        const dt = e.dataTransfer;
-        const files = dt.files;
-        handleFiles(files);
-    }
+        // Dropzone handlers
+        dropzone.addEventListener('click', () => fileInput.click());
+        dropzone.addEventListener('dragover', this.handleDragOver.bind(this));
+        dropzone.addEventListener('dragleave', this.handleDragLeave.bind(this));
+        dropzone.addEventListener('drop', this.handleDrop.bind(this));
 
-    // Handle file selection via click
-    fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+        // Keyboard support for dropzone
+        dropzone.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                fileInput.click();
+            }
+        });
+    },
 
-    function handleFiles(files) {
-        const file = files[0];
-        if (!file) return;
+    handleFileSelect(event) {
+        const file = event.target.files[0];
+        if (file) {
+            this.processFile(file);
+        }
+    },
 
-        // Client-side file validation
-        const fileExtension = file.name.split('.').pop().toLowerCase();
-        if (fileExtension !== 'csv') {
-            alert('Invalid file type. Please upload a .csv file.');
+    handleDragOver(event) {
+        event.preventDefault();
+        event.stopPropagation();
+        const dropzone = document.getElementById('dropzone');
+        dropzone.classList.add('drag-over');
+    },
+
+    handleDragLeave(event) {
+        event.preventDefault();
+        event.stopPropagation();
+        const dropzone = document.getElementById('dropzone');
+        dropzone.classList.remove('drag-over');
+    },
+
+    handleDrop(event) {
+        event.preventDefault();
+        event.stopPropagation();
+        
+        const dropzone = document.getElementById('dropzone');
+        dropzone.classList.remove('drag-over');
+        
+        const files = event.dataTransfer.files;
+        if (files.length > 0) {
+            this.processFile(files[0]);
+        }
+    },
+
+    processFile(file) {
+        // Clear any previous errors
+        this.clearErrors();
+
+        // Validate file type
+        if (!file.name.toLowerCase().endsWith('.csv')) {
+            this.showError('Please select a CSV file only.');
             return;
         }
 
-        const formData = new FormData();
-        formData.append('csvFile', file);
-
-        showLoading();
-
-        // Send the file to the server
-        fetch('/verify-commission', {
-            method: 'POST',
-            body: formData
-        })
-        .then(response => {
-            if (!response.ok) {
-                return response.json().then(err => {
-                    throw new Error(err.error || 'Server error');
-                });
-            }
-            return response.json();
-        })
-        .then(data => {
-            verificationResults = data;
-            displayResults(data);
-            hideLoading();
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            resultsContainer.innerHTML = `<div class="error-message">${error.message}</div>`;
-            hideLoading();
-        });
-    }
-
-    // Display verification results
-    function displayResults(data) {
-        let html = '';
-
-        // Summary Section
-        html += `
-            <h2>Verification Results</h2>
-            <div class="summary-section">
-                <h3>Summary</h3>
-                <p><strong>Total Transactions:</strong> ${data.summary.total_transactions}</p>
-                <p><strong>Total States:</strong> ${data.summary.total_states}</p>
-                <p><strong>Calculated Commission:</strong> $${data.summary.total_calculated_commission}</p>
-                <p><strong>Reported Commission:</strong> $${data.summary.total_reported_commission}</p>
-                <p><strong>Difference:</strong> $${data.summary.difference}</p>
-                <p><strong>Total State Bonuses:</strong> $${data.summary.total_state_bonuses}</p>
-            </div>
-        `;
-
-        // Discrepancies Section
-        html += `
-            <div class="discrepancies-section">
-                <h3>Discrepancies</h3>
-        `;
-        if (data.discrepancies.length > 0) {
-            html += `
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Invoice No.</th>
-                            <th>State</th>
-                            <th>Calculated</th>
-                            <th>Reported</th>
-                            <th>Difference</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${data.discrepancies.map(d => `
-                            <tr class="${parseFloat(d.difference) < 0 ? 'negative' : ''}">
-                                <td>${d.invoice}</td>
-                                <td>${d.state}</td>
-                                <td>$${d.calculated}</td>
-                                <td>$${d.reported}</td>
-                                <td>$${d.difference}</td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            `;
-        } else {
-            html += `<p>No discrepancies found.</p>`;
+        // Validate file size (10MB limit)
+        const maxSize = 10 * 1024 * 1024; // 10MB
+        if (file.size > maxSize) {
+            this.showError('File size must be less than 10MB.');
+            return;
         }
-        html += `</div>`;
 
-        // State Analysis Section
-        html += `
-            <div class="state-analysis-section">
-                <h3>State Analysis</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>State</th>
-                            <th>Total Sales</th>
-                            <th>Tier</th>
-                            <th>Calculated</th>
-                            <th>Reported</th>
-                            <th>Bonus</th>
-                            <th>Transactions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${data.state_analysis.map(s => `
-                            <tr>
-                                <td>${s.state}</td>
-                                <td>$${s.total_sales}</td>
-                                <td>${s.tier}</td>
-                                <td>$${s.calculated_commission}</td>
-                                <td>$${s.reported_commission}</td>
-                                <td>$${s.bonus}</td>
-                                <td>${s.transactions}</td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
+        // Store file and update UI
+        AppState.currentFile = file;
+        this.showFilePreview(file);
+        this.updateVerifyButton();
+        
+        Utils.announce(`File ${file.name} selected successfully`);
+    },
+
+    showFilePreview(file) {
+        const preview = document.getElementById('file-preview');
+        const fileName = document.getElementById('file-name');
+        const fileSize = document.getElementById('file-size');
+        const fileStatus = document.getElementById('file-status');
+
+        if (preview && fileName && fileSize && fileStatus) {
+            fileName.textContent = file.name;
+            fileSize.textContent = Utils.formatFileSize(file.size);
+            fileStatus.textContent = 'Ready to verify';
+            
+            preview.classList.remove('hidden');
+        }
+    },
+
+    removeFile() {
+        AppState.currentFile = null;
+        
+        const preview = document.getElementById('file-preview');
+        const fileInput = document.getElementById('csv-file');
+        
+        if (preview) preview.classList.add('hidden');
+        if (fileInput) fileInput.value = '';
+        
+        this.updateVerifyButton();
+        this.clearErrors();
+        
+        Utils.announce('File removed');
+    },
+
+    updateVerifyButton() {
+        const verifyBtn = document.getElementById('verify-btn');
+        const description = document.getElementById('verify-description');
+        
+        if (!verifyBtn || !description) return;
+
+        if (AppState.currentFile) {
+            verifyBtn.disabled = false;
+            verifyBtn.classList.remove('disabled');
+            description.textContent = 'Ready to process commission data';
+        } else {
+            verifyBtn.disabled = true;
+            verifyBtn.classList.add('disabled');
+            description.textContent = 'Upload a CSV file to enable verification';
+        }
+    },
+
+    showError(message) {
+        const errorContainer = document.getElementById('upload-errors');
+        if (!errorContainer) return;
+
+        errorContainer.innerHTML = `
+            <div class="error-message">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="15" y1="9" x2="9" y2="15"/>
+                    <line x1="9" y1="9" x2="15" y2="15"/>
+                </svg>
+                ${message}
             </div>
         `;
+        errorContainer.classList.remove('hidden');
+        
+        Utils.announce(message, 'assertive');
+    },
 
-        resultsContainer.innerHTML = html;
-        downloadButtons.style.display = 'block';
+    clearErrors() {
+        const errorContainer = document.getElementById('upload-errors');
+        if (errorContainer) {
+            errorContainer.classList.add('hidden');
+            errorContainer.innerHTML = '';
+        }
+    }
+};
+
+// Progress Manager
+const ProgressManager = {
+    show() {
+        const section = document.getElementById('progress-section');
+        if (section) {
+            section.classList.remove('hidden');
+            Utils.scrollToElement('progress-section');
+        }
+    },
+
+    hide() {
+        const section = document.getElementById('progress-section');
+        if (section) {
+            section.classList.add('hidden');
+        }
+    },
+
+    update(percent, message) {
+        const fill = document.getElementById('progress-fill');
+        const text = document.getElementById('progress-text');
+        const percentElement = document.getElementById('progress-percent');
+
+        if (fill) fill.style.width = `${percent}%`;
+        if (text) text.textContent = message;
+        if (percentElement) percentElement.textContent = `${percent}%`;
+    }
+};
+
+// Results Manager
+const ResultsManager = {
+    show(results) {
+        AppState.results = results;
+        
+        this.updateSummaryCards(results.summary);
+        this.updateCommissionBreakdown(results.commission_breakdown);
+        this.updateStateAnalysis(results.state_analysis);
+        this.updateDiscrepancies(results.discrepancies);
+        
+        const section = document.getElementById('results-section');
+        if (section) {
+            section.classList.remove('hidden');
+            Utils.scrollToElement('results-section');
+        }
+        
+        Utils.announce('Verification results are now available');
+    },
+
+    updateSummaryCards(summary) {
+        const elements = {
+            'total-transactions': summary.total_transactions,
+            'total-states': summary.total_states,
+            'calculated-commission': Utils.formatCurrency(summary.total_calculated_commission),
+            'reported-commission': Utils.formatCurrency(summary.total_reported_commission)
+        };
+
+        Object.entries(elements).forEach(([id, value]) => {
+            const element = document.getElementById(id);
+            if (element) element.textContent = value;
+        });
+    },
+
+    updateCommissionBreakdown(breakdown) {
+        // Implementation for commission breakdown display
+        console.log('Commission breakdown:', breakdown);
+    },
+
+    updateStateAnalysis(stateAnalysis) {
+        // Implementation for state analysis display
+        console.log('State analysis:', stateAnalysis);
+    },
+
+    updateDiscrepancies(discrepancies) {
+        // Implementation for discrepancies display
+        console.log('Discrepancies:', discrepancies);
+    }
+};
+
+// Commission Verification Handler
+const CommissionVerifier = {
+    async verify() {
+        if (!AppState.currentFile) {
+            FileUploadManager.showError('Please select a CSV file');
+            return;
+        }
+
+        if (AppState.isProcessing) return;
+
+        AppState.isProcessing = true;
+        this.updateVerifyButton(true);
+        
+        try {
+            ProgressManager.show();
+            ProgressManager.update(10, 'Preparing file upload...');
+
+            const formData = new FormData();
+            formData.append('csvFile', AppState.currentFile);
+
+            ProgressManager.update(30, 'Uploading and parsing CSV data...');
+
+            const response = await fetch('/verify-commission', {
+                method: 'POST',
+                body: formData
+            });
+
+            ProgressManager.update(70, 'Processing commission calculations...');
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Verification failed');
+            }
+
+            const results = await response.json();
+            
+            ProgressManager.update(100, 'Verification complete!');
+            
+            setTimeout(() => {
+                ProgressManager.hide();
+                ResultsManager.show(results);
+            }, 1000);
+
+        } catch (error) {
+            console.error('Verification error:', error);
+            ProgressManager.hide();
+            FileUploadManager.showError(error.message || 'Failed to verify commission data');
+        } finally {
+            AppState.isProcessing = false;
+            this.updateVerifyButton(false);
+        }
+    },
+
+    updateVerifyButton(isProcessing) {
+        const button = document.getElementById('verify-btn');
+        const buttonText = button?.querySelector('.button-text');
+        const buttonLoader = button?.querySelector('.button-loader');
+
+        if (!button || !buttonText || !buttonLoader) return;
+
+        if (isProcessing) {
+            button.disabled = true;
+            buttonText.textContent = 'Processing...';
+            buttonLoader.classList.remove('hidden');
+        } else {
+            FileUploadManager.updateVerifyButton();
+            buttonText.textContent = 'Verify Commission Data';
+            buttonLoader.classList.add('hidden');
+        }
+    }
+};
+
+// Time Display
+const TimeDisplay = {
+    init() {
+        this.updateTime();
+        setInterval(() => this.updateTime(), 1000);
+    },
+
+    updateTime() {
+        const timeElement = document.getElementById('current-time');
+        if (timeElement) {
+            const now = new Date();
+            const timeString = now.toLocaleTimeString('en-US', { 
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+            timeElement.textContent = timeString;
+        }
+    }
+};
+
+// Application Initialization
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('Commission Verifier initializing...');
+    
+    // Initialize all managers
+    FileUploadManager.init();
+    TimeDisplay.init();
+    
+    // Set up verify button handler
+    const verifyBtn = document.getElementById('verify-btn');
+    if (verifyBtn) {
+        verifyBtn.addEventListener('click', () => CommissionVerifier.verify());
     }
     
-    // Download CSV report
-    downloadReportBtn.addEventListener('click', () => {
-        if (!verificationResults) return;
-        fetch('/download-report', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ reportData: verificationResults })
-        })
-        .then(response => response.blob())
-        .then(blob => {
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.style.display = 'none';
-            a.href = url;
-            const timestamp = new Date().toISOString().slice(0, 16).replace(/[:]/g, '-');
-            a.download = `commission_report_${timestamp}.csv`;
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-        })
-        .catch(error => {
-            console.error('Download error:', error);
-            alert('Failed to download report.');
-        });
-    });
-
-    // Download PDF report
-    downloadPdfBtn.addEventListener('click', () => {
-        if (!verificationResults) return;
-        fetch('/download-pdf-report', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ reportData: verificationResults })
-        })
-        .then(response => response.blob())
-        .then(blob => {
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.style.display = 'none';
-            a.href = url;
-            const timestamp = new Date().toISOString().slice(0, 16).replace(/[:]/g, '-');
-            a.download = `commission_report_${timestamp}.pdf`;
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-        })
-        .catch(error => {
-            console.error('Download error:', error);
-            alert('Failed to download PDF report.');
-        });
-    });
-
-    function showLoading() {
-        loadingOverlay.style.display = 'flex';
-    }
-
-    function hideLoading() {
-        loadingOverlay.style.display = 'none';
-    }
+    console.log('Commission Verifier ready');
 });
