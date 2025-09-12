@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const { Parser } = require('json2csv');
 const PDFDocument = require('pdfkit');
+const { finished } = require('stream/promises');
 
 // --- Configuration and Security Setup ---
 const app = express();
@@ -487,57 +488,39 @@ app.post('/download-report', (req, res) => {
             return res.status(400).json({ error: 'No report data provided' });
         }
         
-        const reportRows = [];
+        const csvFields = ['Invoice', 'State', 'Calculated', 'Reported', 'Difference'];
+        const json2csvParser = new Parser({ fields: csvFields });
+
+        const formattedReport = [];
+        formattedReport.push({ Invoice: 'COMMISSION VERIFICATION REPORT', State: '', Calculated: '', Reported: '', Difference: '' });
+        formattedReport.push({ Invoice: 'Generated:', State: new Date().toISOString(), Calculated: '', Reported: '', Difference: '' });
+        formattedReport.push({ Invoice: '', State: '', Calculated: '', Reported: '', Difference: '' });
         
-        reportRows.push(['COMMISSION VERIFICATION REPORT']);
-        reportRows.push(['Generated:', new Date().toISOString()]);
-        reportRows.push([]);
+        formattedReport.push({ Invoice: 'SUMMARY', State: '', Calculated: '', Reported: '', Difference: '' });
+        formattedReport.push({ Invoice: 'Total Transactions:', State: reportData.summary.total_transactions, Calculated: '', Reported: '', Difference: '' });
+        formattedReport.push({ Invoice: 'Total States:', State: reportData.summary.total_states, Calculated: '', Reported: '', Difference: '' });
+        formattedReport.push({ Invoice: 'Calculated Commission:', State: `$${reportData.summary.total_calculated_commission}`, Calculated: '', Reported: '', Difference: '' });
+        formattedReport.push({ Invoice: 'Reported Commission:', State: `$${reportData.summary.total_reported_commission}`, Calculated: '', Reported: '', Difference: '' });
+        formattedReport.push({ Invoice: 'Difference:', State: `$${reportData.summary.difference}`, Calculated: '', Reported: '', Difference: '' });
+        formattedReport.push({ Invoice: 'Total State Bonuses:', State: `$${reportData.summary.total_state_bonuses}`, Calculated: '', Reported: '', Difference: '' });
+        formattedReport.push({ Invoice: '', State: '', Calculated: '', Reported: '', Difference: '' });
         
-        reportRows.push(['SUMMARY']);
-        reportRows.push(['Total Transactions:', reportData.summary.total_transactions]);
-        reportRows.push(['Total States:', reportData.summary.total_states]);
-        reportRows.push(['Calculated Commission:', '$' + reportData.summary.total_calculated_commission]);
-        reportRows.push(['Reported Commission:', '$' + reportData.summary.total_reported_commission]);
-        reportRows.push(['Difference:', '$' + reportData.summary.difference]);
-        reportRows.push(['State Bonuses:', '$' + reportData.summary.total_state_bonuses]);
-        reportRows.push([]);
-        
-        reportRows.push(['STATE ANALYSIS']);
-        reportRows.push(['State', 'Total Sales', 'Tier', 'Commission', 'Reported', 'Bonus', 'Transactions']);
-        
-        reportData.state_analysis.forEach(state => {
-            reportRows.push([
-                state.state,
-                '$' + state.total_sales,
-                state.tier,
-                '$' + state.calculated_commission,
-                '$' + state.reported_commission,
-                '$' + state.bonus,
-                state.transactions
-            ]);
-        });
-        
-        reportRows.push([]);
-        
-        reportRows.push(['DISCREPANCIES']);
+        formattedReport.push({ Invoice: 'DISCREPANCIES', State: '', Calculated: '', Reported: '', Difference: '' });
         if (reportData.discrepancies.length > 0) {
-            reportRows.push(['Invoice', 'State', 'Calculated', 'Reported', 'Difference']);
             reportData.discrepancies.forEach(disc => {
-                reportRows.push([
-                    disc.invoice,
-                    disc.state,
-                    '$' + disc.calculated,
-                    '$' + disc.reported,
-                    '$' + disc.difference
-                ]);
+                formattedReport.push({
+                    Invoice: disc.invoice,
+                    State: disc.state,
+                    Calculated: `$${disc.calculated}`,
+                    Reported: `$${disc.reported}`,
+                    Difference: `$${disc.difference}`
+                });
             });
         } else {
-            reportRows.push(['No discrepancies found']);
+            formattedReport.push({ Invoice: 'No discrepancies found', State: '', Calculated: '', Reported: '', Difference: '' });
         }
         
-        const csvContent = reportRows.map(row => 
-            row.map(cell => `"${cell}"`).join(',')
-        ).join('\n');
+        const csvContent = json2csvParser.parse(formattedReport);
         
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
         const filename = `commission_verification_report_${timestamp}.csv`;
@@ -545,7 +528,7 @@ app.post('/download-report', (req, res) => {
         res.setHeader('Content-Type', 'text/csv');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         res.send(csvContent);
-        
+
     } catch (error) {
         console.error('Download error:', error);
         res.status(500).json({ error: 'Failed to generate report' });
