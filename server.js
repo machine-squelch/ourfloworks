@@ -15,11 +15,19 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cors());
 app.use(express.static('public'));
 
-// Simple multer configuration - accept all files
-const upload = multer({ 
+// Multer configuration with file type filter
+const upload = multer({
     dest: 'uploads/',
     limits: {
         fileSize: 10 * 1024 * 1024 // 10MB
+    },
+    fileFilter: (req, file, cb) => {
+        // Only accept CSV files
+        if (file.mimetype === 'text/csv' || file.mimetype === 'application/csv') {
+            cb(null, true);
+        } else {
+            cb(new Error('File type not supported. Please upload CSV files only.'), false);
+        }
     }
 });
 
@@ -43,96 +51,86 @@ class CommissionVerifier {
     async verifyCommissionData(csvData) {
         const transactions = [];
         const state_totals = {};
-        
+
         console.log('Processing', csvData.length, 'rows');
-        
+
         if (csvData.length === 0) {
             return this.getEmptyResults();
         }
+
+        // Use the first row's headers for mapping
+        const headers = Object.keys(csvData[0]);
+        console.log('CSV headers detected:', headers);
         
-        // Log first row structure
-        console.log('CSV columns:', Object.keys(csvData[0]));
+        const normalize = (str) => String(str).toLowerCase().replace(/[\s_]+/g, '');
         
-        // CORE COLUMNS ONLY - ignore all extra columns
+        function findColumnName(possibleNames) {
+            for (const name of possibleNames) {
+                const normalizedName = normalize(name);
+                const foundHeader = headers.find(h => normalize(h) === normalizedName);
+                if (foundHeader) {
+                    return foundHeader;
+                }
+            }
+            return null;
+        }
+
         const CORE_FIELDS = {
-            customer_no: 'CustomerNo',
-            ship_to_state: 'ShipToState', 
-            invoice_no: 'InvoiceNo',
-            item_code: 'ItemCode',
-            transaction_date: 'TransactionDate',
-            quantity: 'QuantityShipped',
-            unit_price: 'UnitPrice',
-            salesperson: 'Salesperson_Name',
-            reported_commission: 'Total_Calculated_Commission_Amount',
-            line_discount: 'Line_Discount_Amt',
-            // These fields may or may not exist - handle gracefully
-            total_discounted_sales: 'Total Discounted Revenue',
-            is_repeat_product: 'Repeat Product Commission',
-            is_new_product: 'New Product Commission', 
-            is_incentive: 'Incentive Product Commission'
+            customer_no: findColumnName(['CustomerNo', 'Customer #']),
+            ship_to_state: findColumnName(['ShipToState', 'State']),
+            invoice_no: findColumnName(['InvoiceNo', 'InvoiceNumber']),
+            item_code: findColumnName(['ItemCode']),
+            transaction_date: findColumnName(['TransactionDate', 'Date']),
+            quantity: findColumnName(['QuantityShipped', 'Quantity']),
+            unit_price: findColumnName(['UnitPrice', 'Unit Price']),
+            salesperson: findColumnName(['Salesperson_Name', 'Salesperson', 'SalesPersonName']),
+            reported_commission: findColumnName(['Total_Calculated_Commission_Amount', 'ReportedCommission']),
+            line_discount: findColumnName(['Line_Discount_Amt', 'LineDiscount', 'Discount']),
+            total_discounted_sales: findColumnName(['TotalDiscountedRevenue', 'SalesAmount'])
         };
         
-        // Simple field getter that only looks for exact matches
-        function getField(row, fieldName) {
-            return row.hasOwnProperty(fieldName) && row[fieldName] !== undefined && row[fieldName] !== null && row[fieldName] !== '' 
-                ? row[fieldName] 
-                : null;
-        }
-        
+        const isRepeatProductCol = findColumnName(['RepeatProductCommission', 'IsRepeatProduct']);
+        const isNewProductCol = findColumnName(['NewProductCommission', 'IsNewProduct']);
+        const isIncentiveCol = findColumnName(['IncentiveProductCommission', 'IsIncentive']);
+
         for (let i = 0; i < csvData.length; i++) {
             const row = csvData[i];
-            
+
             try {
-                // Extract ONLY core fields
-                const shipToState = getField(row, CORE_FIELDS.ship_to_state);
-                const customerNo = getField(row, CORE_FIELDS.customer_no);
-                const invoiceNo = getField(row, CORE_FIELDS.invoice_no);
+                // Check for critical columns
+                const shipToState = row[CORE_FIELDS.ship_to_state];
                 
-                // Calculate sales amount - try multiple approaches
+                // Calculate sales amount
                 let salesAmount = 0;
+                const totalDiscountedRevenue = row[CORE_FIELDS.total_discounted_sales];
                 
-                // Method 1: Use Total Discounted Revenue if available
-                const totalDiscountedRevenue = getField(row, CORE_FIELDS.total_discounted_sales);
                 if (totalDiscountedRevenue) {
                     salesAmount = parseFloat(totalDiscountedRevenue) || 0;
                 } else {
-                    // Method 2: Calculate from quantity * unit price - line discount
-                    const quantity = parseFloat(getField(row, CORE_FIELDS.quantity) || 0);
-                    const unitPrice = parseFloat(getField(row, CORE_FIELDS.unit_price) || 0);
-                    const lineDiscount = parseFloat(getField(row, CORE_FIELDS.line_discount) || 0);
-                    
+                    const quantity = parseFloat(row[CORE_FIELDS.quantity] || 0);
+                    const unitPrice = parseFloat(row[CORE_FIELDS.unit_price] || 0);
+                    const lineDiscount = parseFloat(row[CORE_FIELDS.line_discount] || 0);
                     salesAmount = (quantity * unitPrice) - lineDiscount;
                 }
-                
-                // Log first few rows for debugging
-                if (i < 3) {
-                    console.log(`Row ${i + 1}:`);
-                    console.log('  State:', shipToState);
-                    console.log('  Customer:', customerNo);
-                    console.log('  Invoice:', invoiceNo);
-                    console.log('  Sales Amount:', salesAmount);
-                }
-                
-                // Only process rows with valid state and positive sales amount
+
                 if (shipToState && salesAmount > 0) {
                     const transaction = {
-                        customer_no: customerNo || '',
+                        customer_no: row[CORE_FIELDS.customer_no] || '',
                         ship_to_state: shipToState,
-                        invoice_no: invoiceNo || '',
-                        item_code: getField(row, CORE_FIELDS.item_code) || '',
-                        transaction_date: getField(row, CORE_FIELDS.transaction_date) || '',
-                        quantity: parseFloat(getField(row, CORE_FIELDS.quantity) || 0),
-                        unit_price: parseFloat(getField(row, CORE_FIELDS.unit_price) || 0),
+                        invoice_no: row[CORE_FIELDS.invoice_no] || '',
+                        item_code: row[CORE_FIELDS.item_code] || '',
+                        transaction_date: row[CORE_FIELDS.transaction_date] || '',
+                        quantity: parseFloat(row[CORE_FIELDS.quantity] || 0),
+                        unit_price: parseFloat(row[CORE_FIELDS.unit_price] || 0),
                         total_discounted_sales: salesAmount,
-                        salesperson: getField(row, CORE_FIELDS.salesperson) || '',
-                        line_discount: parseFloat(getField(row, CORE_FIELDS.line_discount) || 0),
-                        // Commission type fields - default to false if not present
-                        is_repeat_product: this.parseBooleanField(getField(row, CORE_FIELDS.is_repeat_product)),
-                        is_new_product: this.parseBooleanField(getField(row, CORE_FIELDS.is_new_product)),
-                        is_incentive: this.parseBooleanField(getField(row, CORE_FIELDS.is_incentive)),
-                        reported_commission: parseFloat(getField(row, CORE_FIELDS.reported_commission) || 0)
+                        salesperson: row[CORE_FIELDS.salesperson] || '',
+                        line_discount: parseFloat(row[CORE_FIELDS.line_discount] || 0),
+                        is_repeat_product: this.parseBooleanField(row[isRepeatProductCol]),
+                        is_new_product: this.parseBooleanField(row[isNewProductCol]),
+                        is_incentive: this.parseBooleanField(row[isIncentiveCol]),
+                        reported_commission: parseFloat(row[CORE_FIELDS.reported_commission] || 0)
                     };
-                    
+
                     transactions.push(transaction);
                     state_totals[shipToState] = (state_totals[shipToState] || 0) + salesAmount;
                 }
@@ -140,13 +138,13 @@ class CommissionVerifier {
                 console.error(`Error processing row ${i + 1}:`, error);
             }
         }
-        
+
         console.log('Processed', transactions.length, 'valid transactions');
-        
+
         if (transactions.length === 0) {
             return this.getEmptyResults();
         }
-        
+
         return this.calculateVerificationResults(transactions, state_totals);
     }
     
@@ -175,34 +173,34 @@ class CommissionVerifier {
             }
         };
     }
-    
+
     calculateVerificationResults(transactions, state_totals) {
         let total_calculated_commission = 0;
         let total_reported_commission = 0;
         let total_state_bonuses = 0;
-        
+
         const commission_breakdown = {
             'repeat': 0,
             'new': 0,
             'incentive': 0
         };
-        
+
         const state_analysis = [];
         const discrepancies = [];
-        
+
         // Process each state
         for (const [state, total_sales] of Object.entries(state_totals)) {
             const tier = this.getStateTier(total_sales);
             const rates = this.commissionRates[tier];
-            
+
             let state_commission = 0;
             let state_reported = 0;
-            
+
             const state_transactions = transactions.filter(t => t.ship_to_state === state);
-            
+
             for (const transaction of state_transactions) {
                 let commission = 0;
-                
+
                 if (transaction.is_incentive) {
                     commission = transaction.total_discounted_sales * this.incentiveRate;
                     commission_breakdown.incentive += commission;
@@ -213,10 +211,10 @@ class CommissionVerifier {
                     commission = transaction.total_discounted_sales * rates.repeat;
                     commission_breakdown.repeat += commission;
                 }
-                
+
                 state_commission += commission;
                 state_reported += transaction.reported_commission;
-                
+
                 const diff = Math.abs(commission - transaction.reported_commission);
                 if (diff > 0.01) {
                     discrepancies.push({
@@ -228,10 +226,10 @@ class CommissionVerifier {
                     });
                 }
             }
-            
+
             const state_bonus = rates.bonus;
             total_state_bonuses += state_bonus;
-            
+
             state_analysis.push({
                 state: state,
                 total_sales: total_sales.toFixed(2),
@@ -241,13 +239,13 @@ class CommissionVerifier {
                 bonus: state_bonus.toFixed(2),
                 transactions: state_transactions.length
             });
-            
+
             total_calculated_commission += state_commission;
             total_reported_commission += state_reported;
         }
-        
+
         total_calculated_commission += total_state_bonuses;
-        
+
         return {
             summary: {
                 total_transactions: transactions.length,
@@ -272,7 +270,7 @@ class CommissionVerifier {
             }
         };
     }
-    
+
     getStateTier(totalSales) {
         if (totalSales >= 50000) return 'tier3';
         if (totalSales >= 10000) return 'tier2';
@@ -288,10 +286,10 @@ app.post('/verify-commission', upload.single('csvFile'), async (req, res) => {
         }
 
         console.log('Processing file:', req.file.originalname);
-        
+
         const csvData = [];
         const filePath = req.file.path;
-        
+
         // Parse CSV
         await new Promise((resolve, reject) => {
             fs.createReadStream(filePath)
@@ -300,26 +298,30 @@ app.post('/verify-commission', upload.single('csvFile'), async (req, res) => {
                 .on('end', resolve)
                 .on('error', reject);
         });
-        
+
         // Clean up uploaded file
         fs.unlinkSync(filePath);
-        
+
         // Verify commission data
         const verifier = new CommissionVerifier();
         const results = await verifier.verifyCommissionData(csvData);
-        
+
         res.json(results);
-        
+
     } catch (error) {
         console.error('Verification error:', error);
-        
+
         if (req.file && fs.existsSync(req.file.path)) {
             fs.unlinkSync(req.file.path);
         }
-        
-        res.status(500).json({ 
-            error: 'Failed to process file', 
-            details: error.message 
+        // Check for file type error from Multer
+        if (error.message === 'File type not supported. Please upload CSV files only.') {
+            return res.status(415).json({ error: error.message });
+        }
+
+        res.status(500).json({
+            error: 'Failed to process file',
+            details: error.message
         });
     }
 });
@@ -328,17 +330,17 @@ app.post('/verify-commission', upload.single('csvFile'), async (req, res) => {
 app.post('/download-report', (req, res) => {
     try {
         const { reportData } = req.body;
-        
+
         if (!reportData) {
             return res.status(400).json({ error: 'No report data provided' });
         }
-        
+
         const reportRows = [];
-        
+
         reportRows.push(['COMMISSION VERIFICATION REPORT']);
         reportRows.push(['Generated:', new Date().toISOString()]);
         reportRows.push([]);
-        
+
         reportRows.push(['SUMMARY']);
         reportRows.push(['Total Transactions:', reportData.summary.total_transactions]);
         reportRows.push(['Total States:', reportData.summary.total_states]);
@@ -347,10 +349,10 @@ app.post('/download-report', (req, res) => {
         reportRows.push(['Difference:', '$' + reportData.summary.difference]);
         reportRows.push(['State Bonuses:', '$' + reportData.summary.total_state_bonuses]);
         reportRows.push([]);
-        
+
         reportRows.push(['STATE ANALYSIS']);
         reportRows.push(['State', 'Total Sales', 'Tier', 'Commission', 'Reported', 'Bonus', 'Transactions']);
-        
+
         reportData.state_analysis.forEach(state => {
             reportRows.push([
                 state.state,
@@ -362,9 +364,9 @@ app.post('/download-report', (req, res) => {
                 state.transactions
             ]);
         });
-        
+
         reportRows.push([]);
-        
+
         reportRows.push(['DISCREPANCIES']);
         if (reportData.discrepancies.length > 0) {
             reportRows.push(['Invoice', 'State', 'Calculated', 'Reported', 'Difference']);
@@ -380,18 +382,18 @@ app.post('/download-report', (req, res) => {
         } else {
             reportRows.push(['No discrepancies found']);
         }
-        
-        const csvContent = reportRows.map(row => 
+
+        const csvContent = reportRows.map(row =>
             row.map(cell => `"${cell}"`).join(',')
         ).join('\n');
-        
+
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
         const filename = `commission_verification_report_${timestamp}.csv`;
-        
+
         res.setHeader('Content-Type', 'text/csv');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         res.send(csvContent);
-        
+
     } catch (error) {
         console.error('Download error:', error);
         res.status(500).json({ error: 'Failed to generate report' });
@@ -402,4 +404,3 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`Commission Verification Server running on port ${PORT}`);
     console.log(`Access the application at: http://localhost:${PORT}`);
 });
-
