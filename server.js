@@ -9,8 +9,8 @@ const { Parser } = require('json2csv');
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// Cloudflare Turnstile Secret Key - 0x4AAAAAAB03pmsFUE9ifRlL
-const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || '0x4AAAAAAB03pmsFUE9ifRlL';
+// Cloudflare Turnstile Secret Key - ADD YOUR SECRET KEY HERE
+const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || 'YOUR-SECRET-KEY-HERE';
 
 // Basic middleware
 app.use(express.json({ limit: '1mb' }));
@@ -25,8 +25,13 @@ const upload = multer({
         fileSize: 10 * 1024 * 1024 // 10MB
     },
     fileFilter: (req, file, cb) => {
-        // Only accept CSV files
-        if (file.mimetype === 'text/csv' || file.mimetype === 'application/csv') {
+        // Accept CSV files based on extension and MIME type
+        const isCSV = file.originalname.toLowerCase().endsWith('.csv') || 
+                     file.mimetype === 'text/csv' || 
+                     file.mimetype === 'application/csv' ||
+                     file.mimetype === 'text/plain';
+        
+        if (isCSV) {
             cb(null, true);
         } else {
             cb(new Error('File type not supported. Please upload CSV files only.'), false);
@@ -36,6 +41,12 @@ const upload = multer({
 
 // Cloudflare Turnstile verification function
 async function verifyTurnstileToken(token) {
+    // Skip verification if secret key is not configured (for testing)
+    if (TURNSTILE_SECRET_KEY === 'YOUR-SECRET-KEY-HERE') {
+        console.log('Turnstile verification skipped - no secret key configured');
+        return true;
+    }
+    
     try {
         const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
             method: 'POST',
