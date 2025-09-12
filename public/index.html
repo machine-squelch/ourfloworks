@@ -22,9 +22,6 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
     
-    <!-- Cloudflare Turnstile -->
-    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
-    
     <!-- Critical CSS inlined for performance -->
     <style>
         /* Critical path CSS - immediate loading */
@@ -263,21 +260,6 @@
                     <!-- Error display -->
                     <div id="upload-errors" class="error-container hidden" role="alert" aria-live="polite">
                         <!-- Error messages will be inserted here -->
-                    </div>
-                    
-                    <!-- CLOUDFLARE TURNSTILE -->
-                    <div class="turnstile-container" id="turnstile-container" style="display: none;">
-                        <div class="cf-turnstile" 
-                             data-sitekey="0x4AAAAAAB03pmsFUE9ifRlL" 
-                             data-size="compact" 
-                             data-theme="dark" 
-                             data-language="en"
-                             data-callback="onTurnstileSuccess"
-                             data-error-callback="onTurnstileError">
-                        </div>
-                    </div>
-                    <div class="security-notice" id="security-notice" style="display: none;">
-                        🔒 Security verification required before processing sensitive commission data
                     </div>
                     
                     <!-- Action button -->

@@ -1,7 +1,6 @@
 // Application State Management
 const AppState = {
     currentFile: null,
-    turnstileToken: null,
     isProcessing: false,
     results: null
 };
@@ -45,79 +44,6 @@ const Utils = {
             top: offsetPosition,
             behavior: 'smooth'
         });
-    }
-};
-
-// Turnstile Integration
-const TurnstileManager = {
-    // Turnstile success callback
-    onSuccess(token) {
-        console.log('Turnstile verification successful');
-        AppState.turnstileToken = token;
-        
-        // Enable the verify button
-        const verifyBtn = document.getElementById('verify-btn');
-        if (verifyBtn && AppState.currentFile) {
-            verifyBtn.disabled = false;
-            verifyBtn.classList.remove('disabled');
-        }
-        
-        // Update button description
-        const description = document.getElementById('verify-description');
-        if (description) {
-            description.textContent = 'Security verified - Ready to process commission data';
-        }
-        
-        Utils.announce('Security verification completed successfully');
-    },
-
-    // Turnstile error callback
-    onError(error) {
-        console.error('Turnstile verification failed:', error);
-        AppState.turnstileToken = null;
-        
-        // Keep verify button disabled
-        const verifyBtn = document.getElementById('verify-btn');
-        if (verifyBtn) {
-            verifyBtn.disabled = true;
-            verifyBtn.classList.add('disabled');
-        }
-        
-        // Show error message
-        const description = document.getElementById('verify-description');
-        if (description) {
-            description.textContent = 'Security verification failed - Please refresh and try again';
-        }
-        
-        Utils.announce('Security verification failed', 'assertive');
-    },
-
-    // Show Turnstile widget
-    show() {
-        const container = document.getElementById('turnstile-container');
-        const notice = document.getElementById('security-notice');
-        
-        if (container) {
-            container.style.display = 'flex';
-            container.setAttribute('aria-hidden', 'false');
-        }
-        if (notice) {
-            notice.style.display = 'block';
-        }
-    },
-
-    // Hide Turnstile widget
-    hide() {
-        const container = document.getElementById('turnstile-container');
-        const notice = document.getElementById('security-notice');
-        
-        if (container) {
-            container.style.display = 'none';
-            container.setAttribute('aria-hidden', 'true');
-        }
-        if (notice) {
-            notice.style.display = 'none';
-        }
     }
 };
 
@@ -209,9 +135,6 @@ const FileUploadManager = {
         this.showFilePreview(file);
         this.updateVerifyButton();
         
-        // Show Turnstile if file is valid
-        TurnstileManager.show();
-        
         Utils.announce(`File ${file.name} selected successfully`);
     },
 
@@ -232,7 +155,6 @@ const FileUploadManager = {
 
     removeFile() {
         AppState.currentFile = null;
-        AppState.turnstileToken = null;
         
         const preview = document.getElementById('file-preview');
         const fileInput = document.getElementById('csv-file');
@@ -241,7 +163,6 @@ const FileUploadManager = {
         if (fileInput) fileInput.value = '';
         
         this.updateVerifyButton();
-        TurnstileManager.hide();
         this.clearErrors();
         
         Utils.announce('File removed');
@@ -253,14 +174,10 @@ const FileUploadManager = {
         
         if (!verifyBtn || !description) return;
 
-        if (AppState.currentFile && AppState.turnstileToken) {
+        if (AppState.currentFile) {
             verifyBtn.disabled = false;
             verifyBtn.classList.remove('disabled');
-            description.textContent = 'Security verified - Ready to process commission data';
-        } else if (AppState.currentFile) {
-            verifyBtn.disabled = true;
-            verifyBtn.classList.add('disabled');
-            description.textContent = 'Complete security verification to proceed';
+            description.textContent = 'Ready to process commission data';
         } else {
             verifyBtn.disabled = true;
             verifyBtn.classList.add('disabled');
@@ -376,8 +293,8 @@ const ResultsManager = {
 // Commission Verification Handler
 const CommissionVerifier = {
     async verify() {
-        if (!AppState.currentFile || !AppState.turnstileToken) {
-            FileUploadManager.showError('Please select a file and complete security verification');
+        if (!AppState.currentFile) {
+            FileUploadManager.showError('Please select a CSV file');
             return;
         }
 
@@ -392,7 +309,6 @@ const CommissionVerifier = {
 
             const formData = new FormData();
             formData.append('csvFile', AppState.currentFile);
-            formData.append('turnstileToken', AppState.turnstileToken);
 
             ProgressManager.update(30, 'Uploading and parsing CSV data...');
 
@@ -466,15 +382,6 @@ const TimeDisplay = {
             timeElement.textContent = timeString;
         }
     }
-};
-
-// Global Turnstile callbacks (required by Cloudflare)
-window.onTurnstileSuccess = function(token) {
-    TurnstileManager.onSuccess(token);
-};
-
-window.onTurnstileError = function(error) {
-    TurnstileManager.onError(error);
 };
 
 // Application Initialization
