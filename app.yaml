@@ -1,6 +1,6 @@
-name: ourfloworks
+name: dl-commission-verifier
 services:
-- name: ourfloworks
+- name: commission-verifier
   source_dir: .
   github:
     repo: machine-squelch/ourfloworks
@@ -19,8 +19,4 @@ services:
     value: production
   - key: PORT
     value: "8080"
-domains:
-- domain: ourfloworks.com
-  type: PRIMARY
-  zone: ourfloworks.com
 
