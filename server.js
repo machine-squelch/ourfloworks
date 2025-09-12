@@ -9,9 +9,6 @@ const { Parser } = require('json2csv');
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// Cloudflare Turnstile Secret Key - ADD YOUR SECRET KEY HERE
-const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || 'YOUR-SECRET-KEY-HERE';
-
 // Basic middleware
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -38,32 +35,6 @@ const upload = multer({
         }
     }
 });
-
-// Cloudflare Turnstile verification function
-async function verifyTurnstileToken(token) {
-    // Skip verification if secret key is not configured (for testing)
-    if (TURNSTILE_SECRET_KEY === 'YOUR-SECRET-KEY-HERE') {
-        console.log('Turnstile verification skipped - no secret key configured');
-        return true;
-    }
-    
-    try {
-        const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: `secret=${TURNSTILE_SECRET_KEY}&response=${token}`
-        });
-        
-        const result = await response.json();
-        console.log('Turnstile verification result:', result);
-        return result.success;
-    } catch (error) {
-        console.error('Turnstile verification error:', error);
-        return false;
-    }
-}
 
 // Commission Verification Class
 class CommissionVerifier {
@@ -341,31 +312,9 @@ class CommissionVerifier {
     }
 }
 
-// File upload route with Turnstile verification
+// File upload route
 app.post('/verify-commission', upload.single('csvFile'), async (req, res) => {
     try {
-        // Verify Turnstile token first
-        const turnstileToken = req.body.turnstileToken;
-        
-        if (!turnstileToken) {
-            return res.status(400).json({ 
-                error: 'Security verification required',
-                details: 'Turnstile token missing'
-            });
-        }
-        
-        console.log('Verifying Turnstile token...');
-        const isValidToken = await verifyTurnstileToken(turnstileToken);
-        
-        if (!isValidToken) {
-            return res.status(400).json({ 
-                error: 'Security verification failed',
-                details: 'Invalid Turnstile token'
-            });
-        }
-        
-        console.log('Turnstile verification successful');
-
         if (!req.file) {
             return res.status(400).json({ error: 'No file uploaded' });
         }
@@ -489,6 +438,5 @@ app.post('/download-report', (req, res) => {
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Commission Verification Server running on port ${PORT}`);
     console.log(`Access the application at: http://localhost:${PORT}`);
-    console.log(`Turnstile Secret Key configured: ${TURNSTILE_SECRET_KEY !== 'YOUR-SECRET-KEY-HERE' ? 'Yes' : 'No - Please add your secret key'}`);
 });
 
