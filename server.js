@@ -19,7 +19,7 @@ app.use(express.static('public'));
 const upload = multer({
     dest: 'uploads/',
     limits: {
-        fileSize: 10 * 1024 * 1024 // 10MB
+        fileSize: 50 * 1024 * 1024 // 10MB
     },
     fileFilter: (req, file, cb) => {
         // Accept CSV files based on extension and MIME type
