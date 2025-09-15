@@ -1,8 +1,21 @@
-// Application State Management
+// Commission Verification App - Optimized for Performance
 const AppState = {
     currentFile: null,
     isProcessing: false,
     results: null
+};
+
+// Performance optimizations
+const debounce = (func, wait) => {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
 };
 
 // Utility Functions

@@ -17,9 +17,9 @@ if (!fs.existsSync(uploadsDir)) {
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// Basic middleware
-app.use(express.json({ limit: '1mb' }));
-app.use(express.urlencoded({ extended: true }));
+// Basic middleware - optimized for larger files
+app.use(express.json({ limit: '60mb' }));
+app.use(express.urlencoded({ extended: true, limit: '60mb' }));
 app.use(cors());
 app.use(express.static('public'));
 
@@ -42,7 +42,7 @@ app.get('/', (req, res) => {
 const upload = multer({ 
     dest: 'uploads/',
     limits: {
-        fileSize: 10 * 1024 * 1024 // 10MB
+        fileSize: 50 * 1024 * 1024 // 50MB
     }
 });
 

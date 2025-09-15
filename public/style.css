@@ -1,6 +1,37 @@
 /* Modern Commission Verification Web App Styles */
 /* World-class UI with excellent mobile compatibility */
 
+/* ===== PERFORMANCE OPTIMIZATIONS ===== */
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  transform: translateZ(0); /* Force hardware acceleration */
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+}
+
+/* Optimize animations for better performance */
+.glass-shine::after,
+.summary-card::after,
+.table-container::after {
+  will-change: transform, opacity;
+  transform: translateZ(0); /* Force GPU acceleration */
+}
+
+/* Reduce repaints during hover */
+.summary-card,
+.table-container {
+  will-change: transform;
+}
+
 /* ===== CSS CUSTOM PROPERTIES ===== */
 :root {
   /* Spacing system - 8px base */
@@ -979,7 +1010,7 @@ body {
   100% { transform: translateX(100%); }
 }
 
-/* Glass shine animation for cards */
+/* Glass shine animation for cards - faster and smoother */
 @keyframes glassShine {
   0% {
     transform: translateX(-100%) skewX(-15deg);
@@ -1014,10 +1045,14 @@ body {
     rgba(255, 255, 255, 0.2),
     transparent
   );
-  animation: glassShine 3s ease-in-out infinite;
-  animation-delay: 2s;
   pointer-events: none;
   z-index: 1;
+  opacity: 0;
+  transform: translateX(-100%) skewX(-15deg);
+}
+
+.glass-shine:hover::after {
+  animation: glassShine 0.6s ease-out;
 }
 
 .progress-stats {
@@ -1074,7 +1109,7 @@ body {
   overflow: hidden;
 }
 
-/* Glass shine effect for summary cards */
+/* Glass shine effect for summary cards - hover only */
 .summary-card::after {
   content: '';
   position: absolute;
@@ -1090,10 +1125,14 @@ body {
     rgba(255, 255, 255, 0.2),
     transparent
   );
-  animation: glassShine 3.5s ease-in-out infinite;
-  animation-delay: 0.5s;
   pointer-events: none;
   z-index: 1;
+  opacity: 0;
+  transform: translateX(-100%) skewX(-15deg);
+}
+
+.summary-card:hover::after {
+  animation: glassShine 0.8s ease-out;
 }
 
 .summary-card:hover {
@@ -1243,7 +1282,7 @@ body {
   position: relative;
 }
 
-/* Glass shine effect for table containers */
+/* Glass shine effect for table containers - hover only */
 .table-container::after {
   content: '';
   position: absolute;
@@ -1259,10 +1298,14 @@ body {
     rgba(255, 255, 255, 0.15),
     transparent
   );
-  animation: glassShine 5s ease-in-out infinite;
-  animation-delay: 3s;
   pointer-events: none;
   z-index: 1;
+  opacity: 0;
+  transform: translateX(-100%) skewX(-15deg);
+}
+
+.table-container:hover::after {
+  animation: glassShine 1s ease-out;
 }
 
 .results-table {
