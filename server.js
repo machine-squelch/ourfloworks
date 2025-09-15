@@ -29,7 +29,7 @@ app.get('/health', (req, res) => {
         status: 'healthy', 
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
-        version: '1.0.2'
+        version: '1.0.3'
     });
 });
 
