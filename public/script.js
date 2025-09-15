@@ -118,8 +118,9 @@ const FileUploadManager = {
         this.clearErrors();
 
         // Validate file type
-        if (!file.name.toLowerCase().endsWith('.csv')) {
-            this.showError('Please select a CSV file only.');
+        const fileName = file.name.toLowerCase();
+        if (!fileName.endsWith('.xlsx') && !fileName.endsWith('.xls')) {
+            this.showError('Please select an Excel file (.xlsx or .xls) only.');
             return;
         }
 
@@ -181,7 +182,7 @@ const FileUploadManager = {
         } else {
             verifyBtn.disabled = true;
             verifyBtn.classList.add('disabled');
-            description.textContent = 'Upload a CSV file to enable verification';
+            description.textContent = 'Upload an Excel file to enable verification';
         }
     },
 
@@ -265,28 +266,112 @@ const ResultsManager = {
             'total-transactions': summary.total_transactions,
             'total-states': summary.total_states,
             'calculated-commission': Utils.formatCurrency(summary.total_calculated_commission),
-            'reported-commission': Utils.formatCurrency(summary.total_reported_commission)
+            'reported-commission': Utils.formatCurrency(summary.total_reported_commission),
+            'state-bonuses': Utils.formatCurrency(summary.total_state_bonuses || 0)
         };
 
         Object.entries(elements).forEach(([id, value]) => {
             const element = document.getElementById(id);
             if (element) element.textContent = value;
         });
+        
+        // Update verification status based on difference
+        const statusElement = document.getElementById('verification-status');
+        if (statusElement) {
+            const difference = parseFloat(summary.difference || 0);
+            if (Math.abs(difference) < 0.01) {
+                statusElement.textContent = 'VERIFIED';
+                statusElement.className = 'card-value status-verified';
+            } else {
+                statusElement.textContent = 'DISCREPANCY';
+                statusElement.className = 'card-value status-discrepancy';
+            }
+        }
     },
 
     updateCommissionBreakdown(breakdown) {
-        // Implementation for commission breakdown display
-        console.log('Commission breakdown:', breakdown);
+        // Update commission breakdown values
+        const elements = {
+            'repeat-commission': Utils.formatCurrency(breakdown.repeat || 0),
+            'new-commission': Utils.formatCurrency(breakdown.new || 0),
+            'incentive-commission': Utils.formatCurrency(breakdown.incentive || 0)
+        };
+
+        Object.entries(elements).forEach(([id, value]) => {
+            const element = document.getElementById(id);
+            if (element) element.textContent = value;
+        });
+        
+        console.log('Commission breakdown updated:', breakdown);
     },
 
     updateStateAnalysis(stateAnalysis) {
-        // Implementation for state analysis display
-        console.log('State analysis:', stateAnalysis);
+        const tableBody = document.querySelector('#state-table tbody');
+        if (!tableBody) return;
+        
+        // Clear existing rows
+        tableBody.innerHTML = '';
+        
+        if (!stateAnalysis || stateAnalysis.length === 0) {
+            const row = tableBody.insertRow();
+            row.innerHTML = '<td colspan="7" class="no-data">No state data available</td>';
+            return;
+        }
+        
+        // Populate table with state data
+        stateAnalysis.forEach(state => {
+            const row = tableBody.insertRow();
+            row.innerHTML = `
+                <td>${state.state}</td>
+                <td>${Utils.formatCurrency(state.total_sales)}</td>
+                <td class="tier-${state.tier}">${state.tier.toUpperCase()}</td>
+                <td>${Utils.formatCurrency(state.commission)}</td>
+                <td>${Utils.formatCurrency(state.reported)}</td>
+                <td>${Utils.formatCurrency(state.bonus)}</td>
+                <td>${state.transactions}</td>
+            `;
+        });
+        
+        console.log('State analysis updated:', stateAnalysis);
     },
 
     updateDiscrepancies(discrepancies) {
-        // Implementation for discrepancies display
-        console.log('Discrepancies:', discrepancies);
+        const tableBody = document.querySelector('#discrepancies-table tbody');
+        const discrepancyCount = document.getElementById('discrepancy-count');
+        
+        if (!tableBody) return;
+        
+        // Clear existing rows
+        tableBody.innerHTML = '';
+        
+        // Update discrepancy count
+        if (discrepancyCount) {
+            discrepancyCount.textContent = discrepancies ? discrepancies.length : 0;
+        }
+        
+        if (!discrepancies || discrepancies.length === 0) {
+            const row = tableBody.insertRow();
+            row.innerHTML = '<td colspan="5" class="no-data">No discrepancies found</td>';
+            return;
+        }
+        
+        // Populate table with discrepancy data
+        discrepancies.forEach(discrepancy => {
+            const row = tableBody.insertRow();
+            const difference = parseFloat(discrepancy.difference);
+            const rowClass = difference > 0 ? 'positive-diff' : difference < 0 ? 'negative-diff' : '';
+            
+            row.className = rowClass;
+            row.innerHTML = `
+                <td>${discrepancy.invoice}</td>
+                <td>${discrepancy.state}</td>
+                <td>${Utils.formatCurrency(discrepancy.calculated)}</td>
+                <td>${Utils.formatCurrency(discrepancy.reported)}</td>
+                <td class="difference">${difference >= 0 ? '+' : ''}${Utils.formatCurrency(difference)}</td>
+            `;
+        });
+        
+        console.log('Discrepancies updated:', discrepancies);
     }
 };
 
@@ -294,7 +379,7 @@ const ResultsManager = {
 const CommissionVerifier = {
     async verify() {
         if (!AppState.currentFile) {
-            FileUploadManager.showError('Please select a CSV file');
+            FileUploadManager.showError('Please select an Excel file');
             return;
         }
 

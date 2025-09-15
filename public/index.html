@@ -223,16 +223,16 @@
                         </div>
                         
                         <div class="upload-content">
-                            <h3 class="upload-title">Drop your CSV file here</h3>
+                            <h3 class="upload-title">Drop your Excel file here</h3>
                             <p class="upload-subtitle">or click to browse</p>
                             <div id="upload-instructions" class="upload-instructions">
-                                Export DETAIL tab from Google Sheets as CSV (Max 10MB)
+                                Upload Excel file with commission data (Max 10MB)
                             </div>
                         </div>
                         
                         <input type="file" 
                                id="csv-file" 
-                               accept=".csv" 
+                               accept=".xlsx,.xls" 
                                class="sr-only"
                                aria-describedby="upload-instructions">
                     </div>
@@ -278,7 +278,7 @@
                         </span>
                     </button>
                     <div id="verify-description" class="button-description">
-                        Upload a CSV file to enable verification
+                        Upload an Excel file to enable verification
                     </div>
                 </div>
             </section>
@@ -377,8 +377,9 @@
                                         <th>State</th>
                                         <th>Total Sales</th>
                                         <th>Tier</th>
-                                        <th>Commission</th>
-                                        <th>Bonus</th>
+                                        <th>Commission Calculated</th>
+                                        <th>Commission Paid</th>
+                                        <th>Bonus Should Be Paid</th>
                                         <th>Transactions</th>
                                     </tr>
                                 </thead>
@@ -408,9 +409,9 @@
                                     <tr>
                                         <th>Invoice</th>
                                         <th>State</th>
-                                        <th>Calculated</th>
-                                        <th>Reported</th>
-                                        <th>Difference</th>
+                                        <th>Amount Calculated</th>
+                                        <th>Amount Paid</th>
+                                        <th>Amount Owed</th>
                                     </tr>
                                 </thead>
                                 <tbody>

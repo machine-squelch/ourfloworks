@@ -494,6 +494,28 @@ body {
   transition: transform var(--transition-normal) var(--ease-out-cubic);
 }
 
+/* Glass shine effect for tier cards */
+.tier-card::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 30%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.2),
+    rgba(255, 255, 255, 0.4),
+    rgba(255, 255, 255, 0.2),
+    transparent
+  );
+  animation: glassShine 4s ease-in-out infinite;
+  animation-delay: 1s;
+  pointer-events: none;
+  z-index: 1;
+}
+
 .tier-card:hover {
   transform: translateY(-4px);
   box-shadow: 
@@ -605,6 +627,29 @@ body {
   transition: all var(--transition-normal) var(--ease-out-cubic);
   margin-bottom: var(--space-lg);
   pointer-events: auto;
+  overflow: hidden;
+}
+
+/* Glass shine effect for upload dropzone */
+.upload-dropzone::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 30%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(0, 255, 255, 0.1),
+    rgba(0, 255, 255, 0.2),
+    rgba(0, 255, 255, 0.1),
+    transparent
+  );
+  animation: glassShine 4.5s ease-in-out infinite;
+  animation-delay: 1.5s;
+  pointer-events: none;
+  z-index: 1;
 }
 
 .upload-dropzone:hover,
@@ -658,6 +703,30 @@ body {
   border-radius: var(--border-radius);
   margin-bottom: var(--space-lg);
   animation: fileSlideIn 0.3s ease-out;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Glass shine effect for file preview */
+.file-preview::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 30%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.15),
+    rgba(255, 255, 255, 0.25),
+    rgba(255, 255, 255, 0.15),
+    transparent
+  );
+  animation: glassShine 3s ease-in-out infinite;
+  animation-delay: 0.8s;
+  pointer-events: none;
+  z-index: 1;
 }
 
 @keyframes fileSlideIn {
@@ -910,6 +979,47 @@ body {
   100% { transform: translateX(100%); }
 }
 
+/* Glass shine animation for cards */
+@keyframes glassShine {
+  0% {
+    transform: translateX(-100%) skewX(-15deg);
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(200%) skewX(-15deg);
+    opacity: 0;
+  }
+}
+
+.glass-shine {
+  position: relative;
+  overflow: hidden;
+}
+
+.glass-shine::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 30%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.2),
+    rgba(255, 255, 255, 0.4),
+    rgba(255, 255, 255, 0.2),
+    transparent
+  );
+  animation: glassShine 3s ease-in-out infinite;
+  animation-delay: 2s;
+  pointer-events: none;
+  z-index: 1;
+}
+
 .progress-stats {
   display: flex;
   justify-content: space-between;
@@ -960,6 +1070,30 @@ body {
   box-shadow: var(--glass-shadow);
   text-align: center;
   transition: all var(--transition-normal) var(--ease-out-cubic);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Glass shine effect for summary cards */
+.summary-card::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 30%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.2),
+    rgba(255, 255, 255, 0.4),
+    rgba(255, 255, 255, 0.2),
+    transparent
+  );
+  animation: glassShine 3.5s ease-in-out infinite;
+  animation-delay: 0.5s;
+  pointer-events: none;
+  z-index: 1;
 }
 
 .summary-card:hover {
@@ -1106,6 +1240,29 @@ body {
   border: 1px solid var(--glass-border);
   background: var(--glass-bg);
   backdrop-filter: blur(10px);
+  position: relative;
+}
+
+/* Glass shine effect for table containers */
+.table-container::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 30%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.15),
+    rgba(255, 255, 255, 0.3),
+    rgba(255, 255, 255, 0.15),
+    transparent
+  );
+  animation: glassShine 5s ease-in-out infinite;
+  animation-delay: 3s;
+  pointer-events: none;
+  z-index: 1;
 }
 
 .results-table {
