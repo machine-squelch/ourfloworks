@@ -53,6 +53,9 @@ class ImprovedCommissionServer {
      * Setup Express middleware
      */
     setupMiddleware() {
+        // Trust proxy for DigitalOcean Apps and other reverse proxies
+        this.app.set('trust proxy', true);
+
         // Security middleware
         this.app.use(helmet({
             contentSecurityPolicy: {

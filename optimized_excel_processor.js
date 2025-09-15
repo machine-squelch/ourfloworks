@@ -97,10 +97,28 @@ class OptimizedExcelProcessor extends EventEmitter {
             throw new Error(`File size (${stats.size} bytes) exceeds maximum allowed size (${this.options.maxFileSize} bytes)`);
         }
 
-        // Check file extension
-        const ext = path.extname(filePath).toLowerCase();
-        if (!['.xlsx', '.xls', '.csv'].includes(ext)) {
-            throw new Error(`Unsupported file format: ${ext}`);
+        // For uploaded files, the extension might not be preserved in the temp file
+        // Try to read the file as Excel first, then validate
+        try {
+            // Attempt to read as Excel file to validate format
+            const XLSX = require('xlsx');
+            const workbook = XLSX.readFile(filePath, { 
+                cellDates: true,
+                cellNF: false,
+                cellText: false 
+            });
+            
+            // If we can read it and it has sheets, it's a valid Excel file
+            if (workbook && workbook.Sheets && Object.keys(workbook.Sheets).length > 0) {
+                console.log(`File validation passed: ${filePath} (${stats.size} bytes) - Valid Excel format`);
+                return;
+            }
+        } catch (xlsxError) {
+            // If XLSX reading fails, check file extension as fallback
+            const ext = path.extname(filePath).toLowerCase();
+            if (!['.xlsx', '.xls', '.csv'].includes(ext)) {
+                throw new Error(`Unsupported file format. File could not be read as Excel and has unsupported extension: ${ext || 'none'}`);
+            }
         }
 
         console.log(`File validation passed: ${filePath} (${stats.size} bytes)`);
