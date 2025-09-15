@@ -436,8 +436,14 @@ app.post('/download-report', (req, res) => {
         reportRows.push(['State Bonuses:', '$' + reportData.summary.total_state_bonuses]);
         reportRows.push([]);
         
+        reportRows.push(['COMMISSION BREAKDOWN']);
+        reportRows.push(['Repeat Product Commission:', '$' + reportData.commission_breakdown.repeat]);
+        reportRows.push(['New Product Commission:', '$' + reportData.commission_breakdown.new]);
+        reportRows.push(['Incentive Product Commission:', '$' + reportData.commission_breakdown.incentive]);
+        reportRows.push([]);
+        
         reportRows.push(['STATE ANALYSIS']);
-        reportRows.push(['State', 'Total Sales', 'Tier', 'Commission', 'Reported', 'Bonus', 'Transactions']);
+        reportRows.push(['State', 'Total Sales', 'Tier', 'Commission Calculated', 'Commission Paid', 'Bonus Should Be Paid', 'Transactions']);
         
         reportData.state_analysis.forEach(state => {
             reportRows.push([
@@ -455,7 +461,7 @@ app.post('/download-report', (req, res) => {
         
         reportRows.push(['DISCREPANCIES']);
         if (reportData.discrepancies.length > 0) {
-            reportRows.push(['Invoice', 'State', 'Calculated', 'Reported', 'Difference']);
+            reportRows.push(['Invoice', 'State', 'Amount Calculated', 'Amount Paid', 'Amount Owed']);
             reportData.discrepancies.forEach(disc => {
                 reportRows.push([
                     disc.invoice,
