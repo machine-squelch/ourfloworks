@@ -64,7 +64,7 @@ const Utils = {
 const FileUploadManager = {
     init() {
         const dropzone = document.getElementById('dropzone');
-        const fileInput = document.getElementById('csv-file');
+        const fileInput = document.getElementById('excel-file');
         const removeBtn = document.getElementById('remove-file');
 
         if (!dropzone || !fileInput) return;
@@ -171,7 +171,7 @@ const FileUploadManager = {
         AppState.currentFile = null;
         
         const preview = document.getElementById('file-preview');
-        const fileInput = document.getElementById('csv-file');
+        const fileInput = document.getElementById('excel-file');
         
         if (preview) preview.classList.add('hidden');
         if (fileInput) fileInput.value = '';
@@ -429,9 +429,9 @@ const CommissionVerifier = {
             ProgressManager.update(10, 'Preparing file upload...');
 
             const formData = new FormData();
-            formData.append('csvFile', AppState.currentFile);
+            formData.append('excelFile', AppState.currentFile);
 
-            ProgressManager.update(30, 'Uploading and parsing CSV data...');
+            ProgressManager.update(30, 'Uploading and parsing Excel data...');
 
             const response = await fetch('/verify-commission', {
                 method: 'POST',

@@ -611,15 +611,10 @@ class ExcelCommissionVerifier {
             
             // Calculate state bonus
             const state_bonus = this.calculateStateBonus(total_sales, tier);
-            total_state_bonuses += state_bonus;
-                commission_breakdown.new += transaction.new_commission;
-                commission_breakdown.incentive += transaction.incentive_commission;
-            }
             
             // Get what was actually paid
             const paid_data = paid_by_state[state] || { repeat: 0, new: 0, incentive: 0, total: 0, bonus: 0 };
             const reported_commission = paid_data.total;
-            const state_bonus = rates.bonus;
             
             total_calculated_commission += calculated_commission;
             total_reported_commission += reported_commission;
@@ -709,7 +704,7 @@ class ExcelCommissionVerifier {
 }
 
 // File upload route
-app.post('/verify-commission', upload.single('csvFile'), async (req, res) => {
+app.post('/verify-commission', upload.single('excelFile'), async (req, res) => {
     try {
         if (!req.file) {
             return res.status(400).json({ error: 'No file uploaded' });
