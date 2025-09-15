@@ -192,12 +192,10 @@ class ImprovedCommissionServer {
                 
                 // Initialize commission rules (in a real app, these would come from a database)
                 await this.initializeCommissionRules();
-                
-                // Process transactions from all sheets
-                const allTransactions = this.extractTransactionsFromSheets(excelResults.sheets);
-                
-                // Calculate commissions
-                const commissionResults = await this.commissionCalculator.processTransactions(allTransactions);
+                // Use Commission Verifier for simple shortfall calculation
+                const CommissionVerifier = require('./commission_verifier');
+                const verifier = new CommissionVerifier();
+                const verificationResults = verifier.verifyCommission(excelResults.sheets);
 
                 // Combine results
                 const finalResults = {
@@ -205,26 +203,34 @@ class ImprovedCommissionServer {
                     fileName: req.file.originalname,
                     fileSize: req.file.size,
                     processingTime: Date.now() - this.activeProcessing.get(sessionId).startTime,
-                    excelProcessing: {
+                    verification: verificationResults,
+                    summary: {
+                        shouldBePaid: verificationResults.shouldBePaid.totalCommission,
+                        wasPaid: verificationResults.wasPaid,
+                        shortfall: verificationResults.shortfall,
+                        isUnderpaid: verificationResults.verification.isUnderpaid
+                    },
+                    results: verificationResults.shouldBePaid,
+                    excel: {
                         sheetsProcessed: Object.keys(excelResults.sheets).length,
                         totalRows: excelResults.summary.totalRows,
                         processedRows: excelResults.summary.processedRows,
                         errors: excelResults.summary.errors
-                    },
-                    commissionBreakdown: commissionResults.commissionBreakdown,
-                    stateAnalysis: commissionResults.stateAnalysisObject,
-                    discrepancies: commissionResults.discrepancies,
-                    totalCommissionOwed: commissionResults.totalCommissionOwed,
-                    processingStats: commissionResults.processingStats
+                    }
                 };
 
-                // Clean up
-                await this.cleanup(req.file.path, sessionId);
-                
-                res.json({
-                    success: true,
-                    results: finalResults
+                // Store results and clean up
+                this.activeProcessing.set(sessionId, {
+                    ...this.activeProcessing.get(sessionId),
+                    results: finalResults,
+                    status: 'completed'
                 });
+
+                // Clean up uploaded file
+                await this.excelProcessor.cleanup(req.file.path);
+
+                console.log(`✅ Commission verification completed for session ${sessionId}`);
+                res.json(finalResults);
 
             } catch (error) {
                 console.error(`Error in session ${sessionId}:`, error);
