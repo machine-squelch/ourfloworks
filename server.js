@@ -579,13 +579,10 @@ class ExcelCommissionVerifier {
             for (const transaction of state_transactions) {
                 calculated_commission += transaction.total_commission;
                 
-                if (transaction.incentive_commission > 0) {
-                    commission_breakdown.incentive += transaction.incentive_commission;
-                } else if (transaction.new_commission > 0) {
-                    commission_breakdown.new += transaction.new_commission;
-                } else {
-                    commission_breakdown.repeat += transaction.repeat_commission;
-                }
+                // Accumulate commission breakdown properly
+                commission_breakdown.repeat += transaction.repeat_commission;
+                commission_breakdown.new += transaction.new_commission;
+                commission_breakdown.incentive += transaction.incentive_commission;
             }
             
             // Get what was actually paid

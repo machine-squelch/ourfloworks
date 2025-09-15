@@ -482,6 +482,44 @@ const TimeDisplay = {
     }
 };
 
+// Collapsible Section Manager
+const CollapsibleManager = {
+    init() {
+        const headers = document.querySelectorAll('.collapsible-header');
+        headers.forEach(header => {
+            header.addEventListener('click', this.toggleSection.bind(this));
+        });
+    },
+
+    toggleSection(event) {
+        const header = event.currentTarget;
+        const content = header.nextElementSibling;
+        const icon = header.querySelector('.collapsible-icon');
+        
+        if (!content || !icon) return;
+        
+        const isExpanded = header.getAttribute('aria-expanded') === 'true';
+        
+        // Toggle aria-expanded
+        header.setAttribute('aria-expanded', !isExpanded);
+        
+        // Toggle content visibility
+        if (isExpanded) {
+            content.style.maxHeight = '0';
+            content.style.opacity = '0';
+            icon.style.transform = 'rotate(0deg)';
+        } else {
+            content.style.maxHeight = content.scrollHeight + 'px';
+            content.style.opacity = '1';
+            icon.style.transform = 'rotate(180deg)';
+        }
+        
+        // Add transition classes
+        content.style.transition = 'max-height 0.3s ease, opacity 0.3s ease';
+        icon.style.transition = 'transform 0.3s ease';
+    }
+};
+
 // Application Initialization
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Commission Verifier initializing...');
@@ -489,6 +527,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialize all managers
     FileUploadManager.init();
     TimeDisplay.init();
+    CollapsibleManager.init();
     
     // Set up verify button handler
     const verifyBtn = document.getElementById('verify-btn');
