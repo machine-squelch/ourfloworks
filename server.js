@@ -95,6 +95,7 @@ class CommissionVerifier {
         
         // Multiple possible field names for reported commission
         const POSSIBLE_REPORTED_FIELDS = [
+            'CommissionAmt',
             'Total_Calculated_Commission_Amount',
             'Reported_Commission',
             'Original_Commission',
@@ -127,15 +128,16 @@ class CommissionVerifier {
         
         // Improved product type detection with fallback logic
         const determineProductType = (row) => {
-            // Try boolean fields first
-            if (this.parseBooleanField(getField(row, CORE_FIELDS.is_incentive))) return 'incentive';
-            if (this.parseBooleanField(getField(row, CORE_FIELDS.is_new_product))) return 'new';
-            if (this.parseBooleanField(getField(row, CORE_FIELDS.is_repeat_product))) return 'repeat';
+            // Check for new product indicator
+            const newProductField = getField(row, 'Customer_ Current_Period_New_Product_sales');
+            if (newProductField && (newProductField.toLowerCase() === 'yes' || newProductField.toLowerCase() === 'true')) {
+                return 'new';
+            }
             
-            // Fallback: check commission amounts in these fields
-            const incentiveComm = parseFloat(getField(row, CORE_FIELDS.is_incentive) || 0);
-            const newComm = parseFloat(getField(row, CORE_FIELDS.is_new_product) || 0);
-            const repeatComm = parseFloat(getField(row, CORE_FIELDS.is_repeat_product) || 0);
+            // Check commission amount fields to determine type
+            const incentiveComm = parseFloat(getField(row, 'Calculated_Commission_Amount(3)') || 0);
+            const newComm = parseFloat(getField(row, 'New_Product_Sale_Calculated_Commission_Amount(2)') || 0);
+            const repeatComm = parseFloat(getField(row, 'Calculated_Commission_Amount (1)') || 0);
             
             if (incentiveComm > 0) return 'incentive';
             if (newComm > 0) return 'new';
@@ -157,15 +159,16 @@ class CommissionVerifier {
                 // Calculate sales amount - try multiple approaches
                 let salesAmount = 0;
                 
-                // Method 1: Use Total Discounted Revenue if available
-                const totalDiscountedRevenue = getField(row, CORE_FIELDS.total_discounted_sales);
-                if (totalDiscountedRevenue) {
-                    salesAmount = parseFloat(totalDiscountedRevenue) || 0;
+                // Method 1: Use Revised_Unit_Price if available
+                const revisedUnitPrice = getField(row, 'Revised_Unit_Price');
+                const quantity = parseFloat(getField(row, CORE_FIELDS.quantity) || 0);
+                
+                if (revisedUnitPrice && quantity) {
+                    salesAmount = parseFloat(revisedUnitPrice) * quantity;
                 } else {
                     // Method 2: Calculate from quantity * unit price - line discount
-                    const quantity = parseFloat(getField(row, CORE_FIELDS.quantity) || 0);
                     const unitPrice = parseFloat(getField(row, CORE_FIELDS.unit_price) || 0);
-                    const lineDiscount = parseFloat(getField(row, CORE_FIELDS.line_discount) || 0);
+                    const lineDiscount = parseFloat(getField(row, 'Line_Discount_Amt') || 0);
                     
                     salesAmount = (quantity * unitPrice) - lineDiscount;
                 }
@@ -203,17 +206,19 @@ class CommissionVerifier {
                         invoice_no: invoiceNo || '',
                         item_code: getField(row, CORE_FIELDS.item_code) || '',
                         transaction_date: getField(row, CORE_FIELDS.transaction_date) || '',
-                        quantity: parseFloat(getField(row, CORE_FIELDS.quantity) || 0),
+                        quantity: quantity,
                         unit_price: parseFloat(getField(row, CORE_FIELDS.unit_price) || 0),
                         total_discounted_sales: salesAmount,
                         salesperson: getField(row, CORE_FIELDS.salesperson) || '',
-                        line_discount: parseFloat(getField(row, CORE_FIELDS.line_discount) || 0),
+                        line_discount: parseFloat(getField(row, 'Line_Discount_Amt') || 0),
                         // Use improved product type detection
                         product_type: productType,
                         is_repeat_product: productType === 'repeat',
                         is_new_product: productType === 'new',
                         is_incentive: productType === 'incentive',
-                        reported_commission: reportedCommission
+                        reported_commission: reportedCommission,
+                        // Add the calculated commission from CSV
+                        csv_calculated_commission: parseFloat(getField(row, 'Total_Calculated_Commission_Amount') || 0)
                     };
                     
                     transactions.push(transaction);
@@ -305,9 +310,9 @@ class CommissionVerifier {
                     discrepancies.push({
                         invoice: transaction.invoice_no,
                         state: state,
-                        calculated: commission.toFixed(2),
-                        reported: transaction.reported_commission.toFixed(2),
-                        difference: (commission - transaction.reported_commission).toFixed(2)
+                        calculated: transaction.csv_calculated_commission.toFixed(2), // Amount Calculated from CSV
+                        reported: transaction.reported_commission.toFixed(2), // Amount Paid
+                        difference: (transaction.csv_calculated_commission - transaction.reported_commission).toFixed(2) // Amount Owed
                     });
                 }
             }
