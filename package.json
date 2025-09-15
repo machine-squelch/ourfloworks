@@ -1,7 +1,7 @@
 {
   "name": "ourfloworks",
-  "version": "1.0.0",
-  "description": "Thinkazoo Commission Verification Web Application - Secure, Professional Commission Validation System",
+  "version": "2.0.0",
+  "description": "Optimized Commission Verification System - High-Performance, Secure Commission Validation with Advanced Excel Processing",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -18,7 +18,9 @@
     "cors": "^2.8.5",
     "csv-parser": "^3.0.0",
     "express": "^4.19.2",
+    "express-rate-limit": "^6.7.0",
     "form-data": "^4.0.4",
+    "helmet": "^7.0.0",
     "json2csv": "^5.0.7",
     "multer": "^1.4.5-lts.1",
     "node-fetch": "^2.7.0",
