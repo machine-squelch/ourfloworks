@@ -44,7 +44,7 @@ class CommissionVerifier {
         console.log(`💸 Was paid: $${wasPaid.toFixed(2)}`);
         console.log(`📉 Shortfall: $${shortfall.toFixed(2)}`);
         
-        return {
+        const results = {
             shouldBePaid: shouldBePaid,
             wasPaid: wasPaid,
             shortfall: shortfall,
@@ -56,6 +56,13 @@ class CommissionVerifier {
             },
             breakdown: this.createDetailedBreakdown(shouldBePaid, summaryData)
         };
+
+        // Generate visualizations
+        const CommissionVisualizer = require('./commission_visualizer');
+        const visualizer = new CommissionVisualizer();
+        results.visualizations = visualizer.generateVisualizationData(results);
+
+        return results;
     }
 
     /**

@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Commission Discrepancy Analysis</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding: 20px;
+            background: #2a2a2a;
+            border-radius: 10px;
+            border: 2px solid #00ffff;
+        }
+        .header h1 {
+            color: #00ffff;
+            margin: 0 0 10px 0;
+        }
+        .summary-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+        .card {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #00ffff;
+            text-align: center;
+        }
+        .card.negative {
+            border-left-color: #ff4757;
+        }
+        .card.positive {
+            border-left-color: #2ed573;
+        }
+        .card h3 {
+            margin: 0 0 10px 0;
+            color: #00ffff;
+            font-size: 14px;
+            text-transform: uppercase;
+        }
+        .card .value {
+            font-size: 24px;
+            font-weight: bold;
+            margin: 0;
+        }
+        .card .subtext {
+            font-size: 12px;
+            color: #888;
+            margin-top: 5px;
+        }
+        .chart-container {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            border: 1px solid #444;
+        }
+        .chart-title {
+            color: #00ffff;
+            text-align: center;
+            margin-bottom: 20px;
+            font-size: 18px;
+            font-weight: bold;
+        }
+        .chart-wrapper {
+            position: relative;
+            height: 400px;
+        }
+        .chart-wrapper.small {
+            height: 300px;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #888;
+        }
+        .error {
+            background: #442222;
+            border-left-color: #ff4757;
+            color: #ff4757;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        @media (max-width: 768px) {
+            .grid-2 {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔍 Commission Discrepancy Analysis</h1>
+            <p>Visual breakdown of commission shortfalls by state and product type</p>
+        </div>
+
+        <div id="loading" class="loading">
+            <p>📊 Loading commission analysis...</p>
+        </div>
+
+        <div id="error" class="error" style="display: none;">
+            <p>❌ Error loading commission data. Please try uploading your Excel file again.</p>
+        </div>
+
+        <div id="content" style="display: none;">
+            <!-- Summary Cards -->
+            <div class="summary-cards">
+                <div class="card negative">
+                    <h3>Total Shortfall</h3>
+                    <p class="value" id="totalShortfall">$0.00</p>
+                    <p class="subtext">Amount you were underpaid</p>
+                </div>
+                <div class="card">
+                    <h3>Shortfall Percentage</h3>
+                    <p class="value" id="shortfallPercentage">0%</p>
+                    <p class="subtext">Of total commission due</p>
+                </div>
+                <div class="card">
+                    <h3>States Affected</h3>
+                    <p class="value" id="underpaidStates">0</p>
+                    <p class="subtext" id="totalStatesText">of 0 total states</p>
+                </div>
+                <div class="card">
+                    <h3>Commission Due</h3>
+                    <p class="value" id="totalCommissionDue">$0.00</p>
+                    <p class="subtext">What you should have been paid</p>
+                </div>
+            </div>
+
+            <!-- State Comparison Chart -->
+            <div class="chart-container">
+                <div class="chart-title">Commission Comparison by State</div>
+                <div class="chart-wrapper">
+                    <canvas id="stateComparisonChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Product Type and Shortfall Charts -->
+            <div class="grid-2">
+                <div class="chart-container">
+                    <div class="chart-title">Commission by Product Type</div>
+                    <div class="chart-wrapper small">
+                        <canvas id="productTypeChart"></canvas>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <div class="chart-title">Shortfall Distribution</div>
+                    <div class="chart-wrapper small">
+                        <canvas id="shortfallChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tier Analysis Chart -->
+            <div class="chart-container">
+                <div class="chart-title">Revenue vs Commission by Tier</div>
+                <div class="chart-wrapper">
+                    <canvas id="tierAnalysisChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Chart.js default configuration
+        Chart.defaults.color = '#ffffff';
+        Chart.defaults.borderColor = '#444444';
+        Chart.defaults.backgroundColor = 'rgba(0, 255, 255, 0.1)';
+
+        let charts = {};
+
+        // Load commission data from sessionStorage or API
+        async function loadCommissionData() {
+            try {
+                // Try to get data from sessionStorage first
+                const storedData = sessionStorage.getItem('commissionResults');
+                if (storedData) {
+                    const data = JSON.parse(storedData);
+                    if (data.verification && data.verification.visualizations) {
+                        displayCharts(data.verification);
+                        return;
+                    }
+                }
+
+                // If no stored data, show message to upload file
+                document.getElementById('loading').innerHTML = 
+                    '<p>📁 Please upload your Excel file on the main page to see commission analysis.</p>' +
+                    '<p><a href="/" style="color: #00ffff;">← Back to Upload</a></p>';
+                
+            } catch (error) {
+                console.error('Error loading commission data:', error);
+                showError();
+            }
+        }
+
+        function displayCharts(verificationData) {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('content').style.display = 'block';
+
+            // Update summary cards
+            updateSummaryCards(verificationData.visualizations.summary);
+
+            // Create charts
+            createStateComparisonChart(verificationData.visualizations.stateComparison);
+            createProductTypeChart(verificationData.visualizations.productTypeBreakdown);
+            createShortfallChart(verificationData.visualizations.shortfallAnalysis);
+            createTierAnalysisChart(verificationData.visualizations.tierAnalysis);
+        }
+
+        function updateSummaryCards(summary) {
+            document.getElementById('totalShortfall').textContent = `$${summary.totalShortfall.toFixed(2)}`;
+            document.getElementById('shortfallPercentage').textContent = `${summary.shortfallPercentage}%`;
+            document.getElementById('underpaidStates').textContent = summary.underpaidStates;
+            document.getElementById('totalStatesText').textContent = `of ${summary.totalStates} total states`;
+            document.getElementById('totalCommissionDue').textContent = `$${summary.totalCommissionDue.toFixed(2)}`;
+        }
+
+        function createStateComparisonChart(chartData) {
+            const ctx = document.getElementById('stateComparisonChart').getContext('2d');
+            charts.stateComparison = new Chart(ctx, chartData);
+        }
+
+        function createProductTypeChart(chartData) {
+            const ctx = document.getElementById('productTypeChart').getContext('2d');
+            charts.productType = new Chart(ctx, chartData);
+        }
+
+        function createShortfallChart(chartData) {
+            const ctx = document.getElementById('shortfallChart').getContext('2d');
+            
+            if (chartData.type === 'message') {
+                document.getElementById('shortfallChart').parentElement.innerHTML = 
+                    `<div style="text-align: center; padding: 40px; color: #2ed573;">
+                        <h3>${chartData.title}</h3>
+                        <p>${chartData.message}</p>
+                    </div>`;
+                return;
+            }
+            
+            charts.shortfall = new Chart(ctx, chartData);
+        }
+
+        function createTierAnalysisChart(chartData) {
+            const ctx = document.getElementById('tierAnalysisChart').getContext('2d');
+            charts.tierAnalysis = new Chart(ctx, chartData);
+        }
+
+        function showError() {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('error').style.display = 'block';
+        }
+
+        // Load data when page loads
+        window.addEventListener('load', loadCommissionData);
+
+        // Listen for commission results from main page
+        window.addEventListener('storage', function(e) {
+            if (e.key === 'commissionResults') {
+                location.reload();
+            }
+        });
+    </script>
+</body>
+</html>
+

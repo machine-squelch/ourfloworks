@@ -462,6 +462,22 @@ const CommissionVerifier = {
             setTimeout(() => {
                 ProgressManager.hide();
                 ResultsManager.show(results);
+                
+                // Store results for visualization page
+                sessionStorage.setItem('commissionResults', JSON.stringify(results));
+                
+                // Show link to visualizations
+                const visualizationLink = document.createElement('div');
+                visualizationLink.innerHTML = `
+                    <div style="margin-top: 20px; padding: 15px; background: #2a2a2a; border-radius: 8px; border-left: 4px solid #00ffff;">
+                        <h3 style="color: #00ffff; margin: 0 0 10px 0;">📊 Visual Analysis Available</h3>
+                        <p style="margin: 0 0 10px 0;">View detailed charts and graphs of your commission discrepancies.</p>
+                        <a href="/charts.html" target="_blank" style="color: #00ffff; text-decoration: none; font-weight: bold;">
+                            → Open Commission Visualization Dashboard
+                        </a>
+                    </div>
+                `;
+                document.getElementById('results').appendChild(visualizationLink);
             }, 1000);
 
         } catch (error) {
