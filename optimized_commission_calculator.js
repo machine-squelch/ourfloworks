@@ -438,16 +438,42 @@ class OptimizedCommissionCalculator extends EventEmitter {
      * @param {Object} transaction - Transaction to validate
      */
     validateTransaction(transaction) {
-        const requiredFields = ['saleAmount', 'productType', 'state'];
+        // Map Excel column names to expected field names
+        const fieldMappings = {
+            'Total Revenue': 'saleAmount',
+            'BillToState': 'state',
+            'Customer_ Current_Period_New_Product_sales': 'productType'
+        };
+        
+        // Apply field mappings
+        for (const [excelField, expectedField] of Object.entries(fieldMappings)) {
+            if (transaction[excelField] !== undefined && transaction[expectedField] === undefined) {
+                transaction[expectedField] = transaction[excelField];
+            }
+        }
+        
+        // Determine product type based on New Product sales indicator
+        if (transaction['Customer_ Current_Period_New_Product_sales'] === 'Yes') {
+            transaction.productType = 'new';
+        } else if (transaction['Customer_ Current_Period_New_Product_sales'] === 'No') {
+            transaction.productType = 'repeat';
+        }
+        
+        const requiredFields = ['saleAmount', 'state'];
         
         for (const field of requiredFields) {
-            if (!transaction[field]) {
-                throw new Error(`Missing required field: ${field}`);
+            if (!transaction[field] && transaction[field] !== 0) {
+                throw new Error(`Missing required field: ${field} (mapped from Excel columns)`);
             }
         }
 
         if (isNaN(parseFloat(transaction.saleAmount))) {
             throw new Error(`Invalid sale amount: ${transaction.saleAmount}`);
+        }
+        
+        // Set default product type if not determined
+        if (!transaction.productType) {
+            transaction.productType = 'repeat'; // Default to repeat if unclear
         }
     }
 
