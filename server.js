@@ -403,6 +403,7 @@ class ExcelCommissionVerifier {
 
     async processExcelFile(filePath) {
         try {
+            console.log('Starting Excel file processing...');
             const workbook = XLSX.readFile(filePath);
             const sheetNames = workbook.SheetNames;
             
@@ -435,14 +436,21 @@ class ExcelCommissionVerifier {
                 }
             }
             
-            // Convert sheets to JSON
+            // Convert sheets to JSON with timeout protection
+            console.log('Converting sheets to JSON...');
             const detailData = XLSX.utils.sheet_to_json(detailSheet);
             const summaryData = XLSX.utils.sheet_to_json(summarySheet);
             
             console.log(`Detail sheet: ${detailData.length} rows`);
             console.log(`Summary sheet: ${summaryData.length} rows`);
             
-            return this.verifyCommissionData(detailData, summaryData);
+            // Add size limit check
+            if (detailData.length > 10000) {
+                throw new Error('File too large. Please limit to 10,000 rows or less.');
+            }
+            
+            console.log('Starting verification calculation...');
+            return await this.verifyCommissionData(detailData, summaryData);
             
         } catch (error) {
             console.error('Excel processing error:', error);
@@ -496,12 +504,19 @@ class ExcelCommissionVerifier {
     }
 
     calculateVerificationResults(detailData, summaryData, detailColumns, summaryColumns) {
+        console.log('Starting calculation phase...');
         const transactions = [];
         const state_totals = {};
         const paid_by_state = {};
         
+        console.log('Processing detail data...');
         // Process detail data to calculate what should be paid
-        for (const row of detailData) {
+        for (let i = 0; i < detailData.length; i++) {
+            if (i % 100 === 0) {
+                console.log(`Processing detail row ${i}/${detailData.length}`);
+            }
+            
+            const row = detailData[i];
             const state = row[detailColumns.state];
             const revenue = parseFloat(row[detailColumns.revenue] || 0);
             
@@ -536,6 +551,7 @@ class ExcelCommissionVerifier {
             }
         }
         
+        console.log('Processing summary data...');
         // Process summary data to get what was actually paid
         for (const row of summaryData) {
             const state = row[summaryColumns.state];
@@ -550,6 +566,7 @@ class ExcelCommissionVerifier {
             }
         }
         
+        console.log('Calculating final results...');
         console.log('State totals (calculated):', state_totals);
         console.log('Paid by state:', paid_by_state);
         
@@ -568,19 +585,33 @@ class ExcelCommissionVerifier {
         const discrepancies = [];
         
         // Process each state
-        for (const [state, total_sales] of Object.entries(state_totals)) {
+        const states = Object.keys(state_totals);
+        console.log(`Processing ${states.length} states...`);
+        
+        for (let i = 0; i < states.length; i++) {
+            const state = states[i];
+            const total_sales = state_totals[state];
+            
+            console.log(`Processing state ${i + 1}/${states.length}: ${state}`);
+            
             const tier = this.getStateTier(total_sales);
             const rates = this.commissionRates[tier];
             
-            // Calculate what should be paid
+            // Calculate what should be paid - use pre-calculated totals instead of looping again
             const state_transactions = transactions.filter(t => t.ship_to_state === state);
             let calculated_commission = 0;
             
+            // Sum up the commission from transactions for this state
             for (const transaction of state_transactions) {
                 calculated_commission += transaction.total_commission;
-                
-                // Accumulate commission breakdown properly
                 commission_breakdown.repeat += transaction.repeat_commission;
+                commission_breakdown.new += transaction.new_commission;
+                commission_breakdown.incentive += transaction.incentive_commission;
+            }
+            
+            // Calculate state bonus
+            const state_bonus = this.calculateStateBonus(total_sales, tier);
+            total_state_bonuses += state_bonus;
                 commission_breakdown.new += transaction.new_commission;
                 commission_breakdown.incentive += transaction.incentive_commission;
             }
