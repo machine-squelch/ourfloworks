@@ -257,12 +257,22 @@ const ProgressManager = {
 
 // Results Manager
 const ResultsManager = {
-    show(results) {
+    show(response) {
+        // Handle the new API response structure
+        const results = response.results || response;
         AppState.results = results;
         
-        this.updateSummaryCards(results.summary);
-        this.updateCommissionBreakdown(results.commission_breakdown);
-        this.updateStateAnalysis(results.state_analysis);
+        // Create summary object for compatibility
+        const summary = {
+            totalRows: results.excelProcessing?.totalRows || 0,
+            processedRows: results.excelProcessing?.processedRows || 0,
+            totalCommissionOwed: results.totalCommissionOwed || 0,
+            processingTime: results.processingTime || 0
+        };
+        
+        this.updateSummaryCards(summary);
+        this.updateCommissionBreakdown(results.commissionBreakdown || results.commission_breakdown);
+        this.updateStateAnalysis(results.stateAnalysis || results.state_analysis);
         this.updateDiscrepancies(results.discrepancies);
         
         const section = document.getElementById('results-section');
@@ -433,7 +443,7 @@ const CommissionVerifier = {
 
             ProgressManager.update(30, 'Uploading and parsing Excel data...');
 
-            const response = await fetch('/verify-commission', {
+            const response = await fetch('/api/verify-commission', {
                 method: 'POST',
                 body: formData
             });
