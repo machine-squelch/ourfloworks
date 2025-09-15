@@ -1,84 +1,228 @@
 /**
- * Optimized Excel Processor
+ * Smart Excel Processor - Solves the 30% Hang Issue
  * 
- * This module provides improved Excel file processing with streaming support,
- * better memory management, and enhanced error handling.
- * 
- * Key improvements:
- * - Streaming file processing to reduce memory usage
- * - Worker thread support for CPU-intensive operations
- * - Progress tracking and cancellation support
- * - Flexible header mapping for varying Excel formats
- * - Comprehensive validation and error handling
+ * This processor fixes the fundamental problem by:
+ * 1. Detecting actual data range instead of processing empty rows
+ * 2. Only processing rows that contain real data
+ * 3. Avoiding the 1M+ empty row processing that caused hangs
  */
 
 const XLSX = require('xlsx');
 const fs = require('fs');
 const path = require('path');
-const { Worker, isMainThread, parentPort, workerData } = require('worker_threads');
-const EventEmitter = require('events');
+const { EventEmitter } = require('events');
 
 class OptimizedExcelProcessor extends EventEmitter {
     constructor(options = {}) {
         super();
         this.options = {
-            maxFileSize: options.maxFileSize || 50 * 1024 * 1024, // 50MB
-            maxRows: options.maxRows || 50000,
-            chunkSize: options.chunkSize || 1000,
-            useWorkerThread: options.useWorkerThread !== false,
-            tempDir: options.tempDir || path.join(__dirname, 'temp'),
-            headerMappings: options.headerMappings || {},
+            maxFileSize: options.maxFileSize || 50 * 1024 * 1024,
+            maxRows: options.maxRows || 100000,
+            progressInterval: options.progressInterval || 1000,
+            tempDir: options.tempDir || './temp',
             ...options
         };
         
         this.processingState = {
             isProcessing: false,
             currentFile: null,
-            processedRows: 0,
-            totalRows: 0,
             errors: []
         };
-
-        // Ensure temp directory exists
-        this.ensureTempDir();
     }
 
     /**
-     * Process Excel file with streaming and worker thread support
+     * Process Excel file with smart data range detection
      * @param {string} filePath - Path to Excel file
-     * @param {Object} options - Processing options
-     * @returns {Promise<Object>} Processing results
+     * @returns {Object} Processing results
      */
-    async processExcelFile(filePath, options = {}) {
+    async processExcelFile(filePath) {
+        this.processingState.isProcessing = true;
+        this.processingState.currentFile = filePath;
+        this.processingState.errors = [];
+        
         try {
+            console.log('🧠 Starting smart Excel processing...');
+            
             // Validate file
             await this.validateFile(filePath);
             
-            this.processingState.isProcessing = true;
-            this.processingState.currentFile = filePath;
-            this.processingState.errors = [];
-
-            this.emit('processingStarted', { filePath });
-
-            // Read workbook
-            const workbook = await this.readWorkbook(filePath);
+            // Find actual data range first - this is the key fix!
+            const rangeInfo = await this.findActualDataRange(filePath);
             
-            // Validate workbook structure
-            this.validateWorkbookStructure(workbook);
-
-            // Process sheets
-            const results = await this.processWorkbookSheets(workbook, options);
-
-            this.processingState.isProcessing = false;
+            // Read workbook with actual data range
+            console.log(`📖 Reading Excel file (${rangeInfo.actualRowCount} rows instead of ${rangeInfo.fullRange.e.r + 1})...`);
+            const workbook = XLSX.readFile(filePath, {
+                cellDates: true,
+                cellNF: false,
+                cellText: false
+            });
+            
+            const results = {
+                sheets: {},
+                summary: {
+                    totalRows: 0,
+                    processedRows: 0,
+                    errors: [],
+                    rangeOptimization: rangeInfo
+                }
+            };
+            
+            // Process each sheet with smart range detection
+            for (const sheetName of Object.keys(workbook.Sheets)) {
+                console.log(`📋 Processing sheet: ${sheetName}`);
+                const sheetResult = await this.processSheetSmart(workbook, sheetName, rangeInfo);
+                
+                results.sheets[sheetName] = sheetResult;
+                results.summary.totalRows += sheetResult.totalRows;
+                results.summary.processedRows += sheetResult.processedRows;
+                results.summary.errors.push(...sheetResult.errors);
+            }
+            
+            console.log('✅ Smart Excel processing completed');
             this.emit('processingCompleted', results);
-
             return results;
-
+            
         } catch (error) {
-            this.processingState.isProcessing = false;
+            console.error('❌ Smart Excel processing failed:', error);
             this.emit('processingError', error);
             throw error;
+        } finally {
+            this.processingState.isProcessing = false;
         }
+    }
+
+    /**
+     * Find actual data range by scanning for real data
+     * This is the core fix that prevents processing 1M+ empty rows
+     * @param {string} filePath - Path to Excel file
+     * @returns {Object} Range information
+     */
+    async findActualDataRange(filePath) {
+        console.log('🔍 Finding actual data range...');
+        
+        const workbook = XLSX.readFile(filePath, { sheetStubs: true });
+        const sheet1 = workbook.Sheets['Sheet1'];
+        
+        if (!sheet1 || !sheet1['!ref']) {
+            throw new Error('Sheet1 not found or empty');
+        }
+        
+        const fullRange = XLSX.utils.decode_range(sheet1['!ref']);
+        console.log(`📊 Excel reports range: ${XLSX.utils.encode_cell(fullRange.e)} (${fullRange.e.r + 1} rows)`);
+        
+        // Find last row with data by checking key columns
+        let lastDataRow = 0;
+        const keyColumns = [0, 1, 2, 13]; // ARDivisionNo, CustomerNo, BillToState, Total Revenue
+        
+        // Start from a reasonable point and scan backwards
+        const scanStart = Math.min(100000, fullRange.e.r);
+        
+        for (let row = scanStart; row >= 1; row -= 100) {
+            let hasData = false;
+            
+            for (const col of keyColumns) {
+                const cellAddress = XLSX.utils.encode_cell({ r: row, c: col });
+                const cell = sheet1[cellAddress];
+                
+                if (cell && cell.v !== undefined && cell.v !== null && cell.v !== '') {
+                    hasData = true;
+                    break;
+                }
+            }
+            
+            if (hasData) {
+                // Found data, scan forward to find exact last row
+                for (let r = row; r <= Math.min(row + 200, fullRange.e.r); r++) {
+                    let rowHasData = false;
+                    
+                    for (const col of keyColumns) {
+                        const cellAddress = XLSX.utils.encode_cell({ r: r, c: col });
+                        const cell = sheet1[cellAddress];
+                        
+                        if (cell && cell.v !== undefined && cell.v !== null && cell.v !== '') {
+                            rowHasData = true;
+                            lastDataRow = Math.max(lastDataRow, r);
+                            break;
+                        }
+                    }
+                    
+                    if (!rowHasData && r > lastDataRow + 10) {
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+        
+        const reduction = Math.round(((fullRange.e.r - lastDataRow) / fullRange.e.r) * 100);
+        console.log(`✅ Actual last data row: ${lastDataRow} (${reduction}% reduction)`);
+        
+        return {
+            fullRange,
+            actualLastRow: lastDataRow,
+            actualRowCount: lastDataRow + 1,
+            reduction
+        };
+    }
+
+    /**
+     * Process a single sheet with smart range detection
+     * @param {Object} workbook - XLSX workbook
+     * @param {string} sheetName - Name of sheet to process
+     * @param {Object} rangeInfo - Range information
+     * @returns {Object} Sheet processing results
+     */
+    async processSheetSmart(workbook, sheetName, rangeInfo) {
+        const sheet = workbook.Sheets[sheetName];
+        
+        const result = {
+            name: sheetName,
+            totalRows: 0,
+            processedRows: 0,
+            data: [],
+            headers: [],
+            errors: []
+        };
+        
+        try {
+            if (sheetName === 'Sheet1' && rangeInfo) {
+                // Use smart range for Sheet1 - this prevents the hang!
+                const dataRange = {
+                    s: { c: rangeInfo.fullRange.s.c, r: 0 },
+                    e: { c: rangeInfo.fullRange.e.c, r: rangeInfo.actualLastRow }
+                };
+                
+                console.log(`📊 Processing ${rangeInfo.actualRowCount} actual data rows`);
+                const data = XLSX.utils.sheet_to_json(sheet, { 
+                    header: 1,
+                    range: dataRange
+                });
+                
+                result.data = data;
+                result.totalRows = rangeInfo.actualRowCount;
+                result.processedRows = data.length;
+                result.headers = data[0] || [];
+                
+            } else {
+                // Process other sheets normally (they're usually small)
+                const data = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+                result.data = data;
+                result.totalRows = data.length;
+                result.processedRows = data.length;
+                result.headers = data[0] || [];
+            }
+            
+            console.log(`✅ Sheet ${sheetName}: ${result.processedRows} rows processed`);
+            
+        } catch (error) {
+            console.error(`Error processing sheet ${sheetName}:`, error);
+            result.errors.push({
+                sheet: sheetName,
+                error: error.message
+            });
+        }
+        
+        return result;
     }
 
     /**
@@ -86,22 +230,17 @@ class OptimizedExcelProcessor extends EventEmitter {
      * @param {string} filePath - Path to file
      */
     async validateFile(filePath) {
-        // Check if file exists
         if (!fs.existsSync(filePath)) {
             throw new Error(`File not found: ${filePath}`);
         }
 
-        // Check file size
         const stats = fs.statSync(filePath);
         if (stats.size > this.options.maxFileSize) {
             throw new Error(`File size (${stats.size} bytes) exceeds maximum allowed size (${this.options.maxFileSize} bytes)`);
         }
 
-        // For uploaded files, the extension might not be preserved in the temp file
-        // Try to read the file as Excel first, then validate
+        // Try to read the file to validate format
         try {
-            // Attempt to read as Excel file to validate format
-            const XLSX = require('xlsx');
             const workbook = XLSX.readFile(filePath, { 
                 cellDates: true,
                 cellNF: false,
@@ -110,7 +249,7 @@ class OptimizedExcelProcessor extends EventEmitter {
             
             // If we can read it and it has sheets, it's a valid Excel file
             if (workbook && workbook.Sheets && Object.keys(workbook.Sheets).length > 0) {
-                console.log(`File validation passed: ${filePath} (${stats.size} bytes) - Valid Excel format`);
+                console.log(`✅ File validation passed: ${filePath} (${stats.size} bytes) - Valid Excel format`);
                 return;
             }
         } catch (xlsxError) {
@@ -121,441 +260,43 @@ class OptimizedExcelProcessor extends EventEmitter {
             }
         }
 
-        console.log(`File validation passed: ${filePath} (${stats.size} bytes)`);
+        console.log(`✅ File validation passed: ${filePath} (${stats.size} bytes)`);
     }
 
     /**
-     * Read workbook with error handling
-     * @param {string} filePath - Path to Excel file
-     * @returns {Object} XLSX workbook
-     */
-    async readWorkbook(filePath) {
-        try {
-            const workbook = XLSX.readFile(filePath, {
-                cellDates: true,
-                cellNF: false,
-                cellText: false
-            });
-
-            console.log(`Workbook loaded: ${Object.keys(workbook.Sheets).length} sheets`);
-            return workbook;
-
-        } catch (error) {
-            throw new Error(`Failed to read Excel file: ${error.message}`);
-        }
-    }
-
-    /**
-     * Validate workbook structure
-     * @param {Object} workbook - XLSX workbook
-     */
-    validateWorkbookStructure(workbook) {
-        if (!workbook.Sheets || Object.keys(workbook.Sheets).length === 0) {
-            throw new Error('Workbook contains no sheets');
-        }
-
-        // Check for required sheets (Summary and Detail)
-        const sheetNames = Object.keys(workbook.Sheets);
-        const requiredSheets = ['Summary', 'Detail'];
-        
-        const missingSheets = requiredSheets.filter(sheet => 
-            !sheetNames.some(name => name.toLowerCase().includes(sheet.toLowerCase()))
-        );
-
-        if (missingSheets.length > 0) {
-            console.warn(`Missing expected sheets: ${missingSheets.join(', ')}`);
-            console.log(`Available sheets: ${sheetNames.join(', ')}`);
-        }
-    }
-
-    /**
-     * Process all sheets in workbook
-     * @param {Object} workbook - XLSX workbook
-     * @param {Object} options - Processing options
-     * @returns {Object} Processing results
-     */
-    async processWorkbookSheets(workbook, options) {
-        const results = {
-            sheets: {},
-            summary: {
-                totalSheets: 0,
-                totalRows: 0,
-                processedRows: 0,
-                errors: []
-            },
-            processingTime: 0
-        };
-
-        const startTime = Date.now();
-        const sheetNames = Object.keys(workbook.Sheets);
-        results.summary.totalSheets = sheetNames.length;
-
-        for (const sheetName of sheetNames) {
-            try {
-                console.log(`Processing sheet: ${sheetName}`);
-                
-                const sheetResult = await this.processSheet(
-                    workbook.Sheets[sheetName], 
-                    sheetName, 
-                    options
-                );
-                
-                results.sheets[sheetName] = sheetResult;
-                results.summary.totalRows += sheetResult.totalRows;
-                results.summary.processedRows += sheetResult.processedRows;
-
-                this.emit('sheetProcessed', {
-                    sheetName,
-                    result: sheetResult
-                });
-
-            } catch (error) {
-                console.error(`Error processing sheet ${sheetName}:`, error);
-                results.summary.errors.push({
-                    sheet: sheetName,
-                    error: error.message
-                });
-            }
-        }
-
-        results.processingTime = Date.now() - startTime;
-        return results;
-    }
-
-    /**
-     * Process individual sheet with streaming approach
-     * @param {Object} sheet - XLSX sheet
-     * @param {string} sheetName - Name of the sheet
-     * @param {Object} options - Processing options
-     * @returns {Object} Sheet processing results
-     */
-    async processSheet(sheet, sheetName, options) {
-        // Convert sheet to JSON with header mapping
-        const rawData = XLSX.utils.sheet_to_json(sheet, {
-            header: 1, // Use array format for flexible header handling
-            defval: null,
-            blankrows: false
-        });
-
-        if (rawData.length === 0) {
-            return {
-                sheetName,
-                totalRows: 0,
-                processedRows: 0,
-                data: [],
-                headers: [],
-                errors: []
-            };
-        }
-
-        // Extract and map headers
-        const headers = this.extractAndMapHeaders(rawData[0], sheetName);
-        const dataRows = rawData.slice(1);
-
-        // Validate row count
-        if (dataRows.length > this.options.maxRows) {
-            throw new Error(`Sheet ${sheetName} contains ${dataRows.length} rows, exceeding maximum of ${this.options.maxRows}`);
-        }
-
-        // Process data in chunks
-        const processedData = [];
-        const errors = [];
-        let processedRows = 0;
-
-        for (let i = 0; i < dataRows.length; i += this.options.chunkSize) {
-            const chunk = dataRows.slice(i, i + this.options.chunkSize);
-            
-            try {
-                const processedChunk = await this.processDataChunk(chunk, headers, sheetName);
-                processedData.push(...processedChunk.data);
-                errors.push(...processedChunk.errors);
-                processedRows += processedChunk.processedCount;
-
-                // Report progress
-                const progress = Math.min(100, Math.round(((i + chunk.length) / dataRows.length) * 100));
-                this.emit('progress', {
-                    sheet: sheetName,
-                    processed: i + chunk.length,
-                    total: dataRows.length,
-                    percentage: progress
-                });
-
-            } catch (error) {
-                console.error(`Error processing chunk ${i}-${i + chunk.length} in ${sheetName}:`, error);
-                errors.push({
-                    rowRange: `${i + 2}-${i + chunk.length + 1}`, // +2 for header and 0-based index
-                    error: error.message
-                });
-            }
-        }
-
-        return {
-            sheetName,
-            totalRows: dataRows.length,
-            processedRows,
-            data: processedData,
-            headers,
-            errors
-        };
-    }
-
-    /**
-     * Extract and map headers with flexible matching
-     * @param {Array} headerRow - Raw header row
-     * @param {string} sheetName - Sheet name for context
-     * @returns {Array} Mapped headers
-     */
-    extractAndMapHeaders(headerRow, sheetName) {
-        const headers = [];
-        const mappings = this.options.headerMappings[sheetName] || this.options.headerMappings.default || {};
-
-        headerRow.forEach((header, index) => {
-            if (header) {
-                const normalizedHeader = String(header).trim().toLowerCase();
-                
-                // Check for explicit mapping
-                const mappedHeader = mappings[normalizedHeader] || 
-                                   this.findBestHeaderMatch(normalizedHeader) ||
-                                   header;
-
-                headers.push({
-                    index,
-                    original: header,
-                    normalized: normalizedHeader,
-                    mapped: mappedHeader
-                });
-            }
-        });
-
-        console.log(`Mapped ${headers.length} headers for sheet ${sheetName}`);
-        return headers;
-    }
-
-    /**
-     * Find best header match using fuzzy matching
-     * @param {string} header - Header to match
-     * @returns {string|null} Best match or null
-     */
-    findBestHeaderMatch(header) {
-        const standardHeaders = {
-            'sale amount': 'saleAmount',
-            'sales amount': 'saleAmount',
-            'amount': 'saleAmount',
-            'total': 'saleAmount',
-            'product type': 'productType',
-            'product': 'productType',
-            'type': 'productType',
-            'state': 'state',
-            'state code': 'state',
-            'region': 'salesRegion',
-            'sales region': 'salesRegion',
-            'customer type': 'customerType',
-            'customer': 'customerType',
-            'channel': 'salesChannel',
-            'sales channel': 'salesChannel',
-            'commission': 'commissionAmount',
-            'commission amount': 'commissionAmount'
-        };
-
-        // Direct match
-        if (standardHeaders[header]) {
-            return standardHeaders[header];
-        }
-
-        // Partial match
-        for (const [key, value] of Object.entries(standardHeaders)) {
-            if (header.includes(key) || key.includes(header)) {
-                return value;
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Process data chunk
-     * @param {Array} chunk - Data chunk to process
-     * @param {Array} headers - Header mappings
-     * @param {string} sheetName - Sheet name
-     * @returns {Object} Processed chunk results
-     */
-    async processDataChunk(chunk, headers, sheetName) {
-        const processedData = [];
-        const errors = [];
-        let processedCount = 0;
-
-        for (let i = 0; i < chunk.length; i++) {
-            try {
-                const row = chunk[i];
-                const processedRow = this.processDataRow(row, headers, i);
-                
-                if (processedRow) {
-                    processedData.push(processedRow);
-                    processedCount++;
-                }
-
-            } catch (error) {
-                errors.push({
-                    row: i + 2, // +2 for header and 0-based index
-                    error: error.message,
-                    data: chunk[i]
-                });
-            }
-        }
-
-        return {
-            data: processedData,
-            errors,
-            processedCount
-        };
-    }
-
-    /**
-     * Process individual data row
-     * @param {Array} row - Raw data row
-     * @param {Array} headers - Header mappings
-     * @param {number} rowIndex - Row index for error reporting
-     * @returns {Object|null} Processed row or null if invalid
-     */
-    processDataRow(row, headers, rowIndex) {
-        const processedRow = {};
-        let hasValidData = false;
-
-        headers.forEach(header => {
-            const cellValue = row[header.index];
-            
-            if (cellValue !== null && cellValue !== undefined && cellValue !== '') {
-                processedRow[header.mapped] = this.processCellValue(cellValue, header.mapped);
-                hasValidData = true;
-            }
-        });
-
-        // Skip empty rows
-        if (!hasValidData) {
-            return null;
-        }
-
-        // Validate required fields
-        this.validateRowData(processedRow, rowIndex);
-
-        return processedRow;
-    }
-
-    /**
-     * Process cell value based on field type
-     * @param {*} value - Raw cell value
-     * @param {string} fieldName - Field name for type inference
-     * @returns {*} Processed value
-     */
-    processCellValue(value, fieldName) {
-        // Handle numeric fields
-        if (['saleAmount', 'commissionAmount'].includes(fieldName)) {
-            const numValue = parseFloat(value);
-            if (isNaN(numValue)) {
-                throw new Error(`Invalid numeric value for ${fieldName}: ${value}`);
-            }
-            return numValue;
-        }
-
-        // Handle date fields
-        if (fieldName.toLowerCase().includes('date')) {
-            if (value instanceof Date) {
-                return value;
-            }
-            const dateValue = new Date(value);
-            if (isNaN(dateValue.getTime())) {
-                throw new Error(`Invalid date value for ${fieldName}: ${value}`);
-            }
-            return dateValue;
-        }
-
-        // Handle string fields
-        return String(value).trim();
-    }
-
-    /**
-     * Validate row data
-     * @param {Object} row - Processed row data
-     * @param {number} rowIndex - Row index for error reporting
-     */
-    validateRowData(row, rowIndex) {
-        const requiredFields = ['saleAmount'];
-        
-        for (const field of requiredFields) {
-            if (!row[field] && row[field] !== 0) {
-                throw new Error(`Missing required field '${field}' in row ${rowIndex + 2}`);
-            }
-        }
-
-        // Validate sale amount
-        if (row.saleAmount < 0) {
-            throw new Error(`Invalid sale amount (${row.saleAmount}) in row ${rowIndex + 2}`);
-        }
-    }
-
-    /**
-     * Ensure temp directory exists
-     */
-    ensureTempDir() {
-        if (!fs.existsSync(this.options.tempDir)) {
-            fs.mkdirSync(this.options.tempDir, { recursive: true });
-        }
-    }
-
-    /**
-     * Clean up temporary files
-     * @param {string} filePath - File path to clean up
-     */
-    async cleanup(filePath) {
-        try {
-            if (fs.existsSync(filePath)) {
-                fs.unlinkSync(filePath);
-                console.log(`Cleaned up temporary file: ${filePath}`);
-            }
-        } catch (error) {
-            console.error(`Error cleaning up file ${filePath}:`, error);
-        }
-    }
-
-    /**
-     * Cancel current processing
+     * Cancel processing
      */
     cancelProcessing() {
-        if (this.processingState.isProcessing) {
-            this.processingState.isProcessing = false;
-            this.emit('processingCancelled');
-        }
+        console.log('🛑 Cancelling Excel processing...');
+        this.processingState.shouldCancel = true;
     }
 
     /**
-     * Get current processing status
-     * @returns {Object} Processing status
+     * Get processing status
+     * @returns {Object} Status information
      */
     getProcessingStatus() {
         return {
-            ...this.processingState,
-            options: this.options
+            isProcessing: this.processingState.isProcessing,
+            currentFile: this.processingState.currentFile,
+            errors: this.processingState.errors
         };
     }
-}
 
-// Worker thread implementation for CPU-intensive processing
-if (!isMainThread) {
-    const { filePath, options } = workerData;
-    
-    const processor = new OptimizedExcelProcessor(options);
-    
-    processor.on('progress', (progress) => {
-        parentPort.postMessage({ type: 'progress', data: progress });
-    });
-
-    processor.processExcelFile(filePath, options)
-        .then(result => {
-            parentPort.postMessage({ type: 'result', data: result });
-        })
-        .catch(error => {
-            parentPort.postMessage({ type: 'error', data: error.message });
-        });
+    /**
+     * Clean up resources
+     * @param {string} filePath - File to clean up
+     */
+    async cleanup(filePath) {
+        try {
+            if (filePath && fs.existsSync(filePath)) {
+                fs.unlinkSync(filePath);
+                console.log(`🧹 Cleaned up file: ${filePath}`);
+            }
+        } catch (error) {
+            console.error('Error during cleanup:', error);
+        }
+    }
 }
 
 module.exports = OptimizedExcelProcessor;
