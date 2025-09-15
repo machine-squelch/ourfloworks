@@ -7,7 +7,7 @@ services:
     branch: main
     deploy_on_push: true
   run_command: npm start
-  build_command: npm install && mkdir -p uploads
+  build_command: npm install
   environment_slug: node-js
   instance_count: 1
   instance_size_slug: basic-xs
