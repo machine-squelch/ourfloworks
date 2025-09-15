@@ -131,13 +131,24 @@ class ImprovedCommissionServer {
                 const allowedTypes = [
                     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                     'application/vnd.ms-excel',
-                    'text/csv'
+                    'text/csv',
+                    'application/octet-stream' // Sometimes Excel files are detected as this
                 ];
                 
-                if (allowedTypes.includes(file.mimetype)) {
+                // Get file extension
+                const fileExtension = file.originalname.toLowerCase().split('.').pop();
+                const allowedExtensions = ['xlsx', 'xls', 'csv'];
+                
+                // Check both MIME type and file extension
+                const validMimeType = allowedTypes.includes(file.mimetype);
+                const validExtension = allowedExtensions.includes(fileExtension);
+                
+                if (validMimeType || validExtension) {
+                    console.log(`File accepted: ${file.originalname} (MIME: ${file.mimetype}, Ext: ${fileExtension})`);
                     cb(null, true);
                 } else {
-                    cb(new Error('Invalid file type. Only Excel and CSV files are allowed.'));
+                    console.log(`File rejected: ${file.originalname} (MIME: ${file.mimetype}, Ext: ${fileExtension})`);
+                    cb(new Error(`Invalid file type. Only Excel (.xlsx, .xls) and CSV files are allowed. Received: ${file.mimetype}`));
                 }
             }
         });
