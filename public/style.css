@@ -1302,6 +1302,22 @@ body {
   color: var(--color-text-secondary);
 }
 
+/* Total row styling for discrepancies table */
+.total-row {
+  background: rgba(0, 255, 255, 0.1) !important;
+  border-top: 2px solid var(--color-neon-cyan);
+}
+
+.total-row td {
+  font-weight: 700;
+  color: var(--color-neon-cyan);
+  padding: var(--space-md) var(--space-sm);
+}
+
+.total-row:hover {
+  background: rgba(0, 255, 255, 0.15) !important;
+}
+
 .no-data-content {
   display: flex;
   flex-direction: column;

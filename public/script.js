@@ -137,10 +137,10 @@ const FileUploadManager = {
             return;
         }
 
-        // Validate file size (10MB limit)
-        const maxSize = 10 * 1024 * 1024; // 10MB
+        // Validate file size (50MB limit)
+        const maxSize = 50 * 1024 * 1024; // 50MB
         if (file.size > maxSize) {
-            this.showError('File size must be less than 10MB.');
+            this.showError('File size must be less than 50MB.');
             return;
         }
 
@@ -271,6 +271,12 @@ const ResultsManager = {
             Utils.scrollToElement('results-section');
         }
         
+        // Enable download button
+        const downloadBtn = document.getElementById('download-btn');
+        if (downloadBtn) {
+            downloadBtn.disabled = false;
+        }
+        
         Utils.announce('Verification results are now available');
     },
 
@@ -351,6 +357,7 @@ const ResultsManager = {
     updateDiscrepancies(discrepancies) {
         const tableBody = document.querySelector('#discrepancies-table tbody');
         const discrepancyCount = document.getElementById('discrepancy-count');
+        const totalOwedElement = document.getElementById('total-commission-owed');
         
         if (!tableBody) return;
         
@@ -365,14 +372,24 @@ const ResultsManager = {
         if (!discrepancies || discrepancies.length === 0) {
             const row = tableBody.insertRow();
             row.innerHTML = '<td colspan="5" class="no-data">No discrepancies found</td>';
+            if (totalOwedElement) {
+                totalOwedElement.innerHTML = '<strong>$0.00</strong>';
+            }
             return;
         }
+        
+        let totalOwed = 0;
         
         // Populate table with discrepancy data
         discrepancies.forEach(discrepancy => {
             const row = tableBody.insertRow();
             const difference = parseFloat(discrepancy.difference);
             const rowClass = difference > 0 ? 'positive-diff' : difference < 0 ? 'negative-diff' : '';
+            
+            // Add to total owed (only positive differences)
+            if (difference > 0) {
+                totalOwed += difference;
+            }
             
             row.className = rowClass;
             row.innerHTML = `
@@ -384,7 +401,13 @@ const ResultsManager = {
             `;
         });
         
+        // Update total commission owed
+        if (totalOwedElement) {
+            totalOwedElement.innerHTML = `<strong>${Utils.formatCurrency(totalOwed)}</strong>`;
+        }
+        
         console.log('Discrepancies updated:', discrepancies);
+        console.log('Total commission owed:', totalOwed);
     }
 };
 
