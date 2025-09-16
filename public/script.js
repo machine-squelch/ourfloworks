@@ -243,7 +243,7 @@ const ProgressManager = {
     }
 };
 
-// Results Manager
+// Results Manager - FIXED VERSION
 const ResultsManager = {
     show(results) {
         AppState.results = results;
@@ -264,10 +264,10 @@ const ResultsManager = {
 
     updateSummaryCards(summary) {
         const elements = {
-            'total-transactions': summary.total_transactions,
-            'total-states': summary.total_states,
-            'calculated-commission': Utils.formatCurrency(summary.total_calculated_commission),
-            'reported-commission': Utils.formatCurrency(summary.total_reported_commission)
+            'total-transactions': summary.total_transactions || 0,
+            'total-states': summary.total_states || 0,
+            'calculated-commission': Utils.formatCurrency(summary.total_calculated_commission || 0),
+            'verification-status': summary.status || 'Complete'
         };
 
         Object.entries(elements).forEach(([id, value]) => {
@@ -277,18 +277,101 @@ const ResultsManager = {
     },
 
     updateCommissionBreakdown(breakdown) {
-        // Implementation for commission breakdown display
-        console.log('Commission breakdown:', breakdown);
+        if (!breakdown) return;
+        
+        // Update commission breakdown values
+        const elements = {
+            'repeat-commission': Utils.formatCurrency(breakdown.repeat_commission || 0),
+            'new-commission': Utils.formatCurrency(breakdown.new_product_commission || 0),
+            'incentive-commission': Utils.formatCurrency(breakdown.incentive_commission || 0),
+            'state-bonuses': Utils.formatCurrency(breakdown.state_bonuses || 0)
+        };
+
+        Object.entries(elements).forEach(([id, value]) => {
+            const element = document.getElementById(id);
+            if (element) element.textContent = value;
+        });
     },
 
     updateStateAnalysis(stateAnalysis) {
-        // Implementation for state analysis display
-        console.log('State analysis:', stateAnalysis);
+        if (!stateAnalysis || !Array.isArray(stateAnalysis)) return;
+        
+        const tableBody = document.querySelector('#state-table tbody');
+        if (!tableBody) return;
+        
+        // Clear existing rows
+        tableBody.innerHTML = '';
+        
+        // Add state data rows
+        stateAnalysis.forEach(state => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${state.state || 'N/A'}</td>
+                <td>${Utils.formatCurrency(state.total_sales || 0)}</td>
+                <td>${state.tier || 'N/A'}</td>
+                <td>${Utils.formatCurrency(state.commission || 0)}</td>
+                <td>${Utils.formatCurrency(state.bonus || 0)}</td>
+                <td>${state.transactions || 0}</td>
+            `;
+            tableBody.appendChild(row);
+        });
+        
+        // Show the state analysis section
+        const stateSection = document.querySelector('#state-content');
+        if (stateSection) {
+            stateSection.style.display = 'block';
+        }
     },
 
     updateDiscrepancies(discrepancies) {
-        // Implementation for discrepancies display
-        console.log('Discrepancies:', discrepancies);
+        if (!discrepancies || !Array.isArray(discrepancies)) {
+            discrepancies = [];
+        }
+        
+        // Update discrepancy count
+        const countElement = document.getElementById('discrepancy-count');
+        if (countElement) {
+            countElement.textContent = discrepancies.length;
+        }
+        
+        const tableBody = document.querySelector('#discrepancies-table tbody');
+        if (!tableBody) return;
+        
+        // Clear existing rows
+        tableBody.innerHTML = '';
+        
+        if (discrepancies.length === 0) {
+            // Show "no discrepancies" message
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td colspan="5" style="text-align: center; color: #4CAF50; font-weight: bold;">
+                    ✅ No discrepancies found - all calculations are accurate!
+                </td>
+            `;
+            tableBody.appendChild(row);
+        } else {
+            // Add discrepancy rows
+            discrepancies.forEach(discrepancy => {
+                const row = document.createElement('tr');
+                const difference = (discrepancy.calculated || 0) - (discrepancy.reported || 0);
+                const differenceClass = difference > 0 ? 'positive' : difference < 0 ? 'negative' : 'neutral';
+                
+                row.innerHTML = `
+                    <td>${discrepancy.invoice || 'N/A'}</td>
+                    <td>${discrepancy.state || 'N/A'}</td>
+                    <td>${Utils.formatCurrency(discrepancy.calculated || 0)}</td>
+                    <td>${Utils.formatCurrency(discrepancy.reported || 0)}</td>
+                    <td class="${differenceClass}">${Utils.formatCurrency(difference)}</td>
+                `;
+                tableBody.appendChild(row);
+            });
+        }
+        
+        // Show the discrepancies section
+        const discrepanciesSection = document.querySelector('#discrepancies-content');
+        if (discrepanciesSection) {
+            discrepanciesSection.style.display = 'block';
+        }
     }
 };
 
@@ -390,6 +473,42 @@ const CommissionVerifier = {
     }
 };
 
+// Collapsible sections handler
+const CollapsibleManager = {
+    init() {
+        // Add click handlers for collapsible sections
+        const headers = document.querySelectorAll('.collapsible-header');
+        headers.forEach(header => {
+            header.addEventListener('click', this.toggleSection.bind(this));
+            header.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    this.toggleSection(e);
+                }
+            });
+        });
+    },
+
+    toggleSection(event) {
+        const header = event.currentTarget;
+        const content = document.getElementById(header.getAttribute('aria-controls'));
+        const icon = header.querySelector('.collapsible-icon svg');
+        
+        if (!content) return;
+        
+        const isExpanded = header.getAttribute('aria-expanded') === 'true';
+        
+        // Toggle expanded state
+        header.setAttribute('aria-expanded', !isExpanded);
+        content.style.display = isExpanded ? 'none' : 'block';
+        
+        // Rotate icon
+        if (icon) {
+            icon.style.transform = isExpanded ? 'rotate(0deg)' : 'rotate(180deg)';
+        }
+    }
+};
+
 // Time Display
 const TimeDisplay = {
     init() {
@@ -418,6 +537,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Initialize all managers
     FileUploadManager.init();
+    CollapsibleManager.init();
     TimeDisplay.init();
     
     // Set up verify button handler
@@ -428,3 +548,4 @@ document.addEventListener('DOMContentLoaded', function() {
     
     console.log('Commission Verifier ready');
 });
+
