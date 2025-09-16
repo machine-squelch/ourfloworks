@@ -3,56 +3,27 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const XLSX = require('xlsx');
-const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// Production-ready middleware configuration
-app.use(helmet({
-    contentSecurityPolicy: {
-        directives: {
-            defaultSrc: ["'self'"],
-            styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-            fontSrc: ["'self'", "https://fonts.gstatic.com"],
-            scriptSrc: ["'self'"],
-            imgSrc: ["'self'", "data:", "https:"],
-        },
-    },
-}));
-
-// Configure trust proxy for DigitalOcean
+// Configure trust proxy for DigitalOcean (fixes rate limiting issue)
 app.set('trust proxy', 1);
 
-// Production-safe rate limiting
-const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // limit each IP to 100 requests per windowMs
-    message: 'Too many requests from this IP, please try again later.',
-    standardHeaders: true,
-    legacyHeaders: false,
-    // Skip rate limiting for trusted proxies
-    skip: (req) => {
-        // Skip rate limiting in development
-        return process.env.NODE_ENV === 'development';
-    }
-});
-
-app.use(limiter);
+// Basic middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Serve static files
 app.use(express.static('public'));
 
-// Create uploads directory
+// Create uploads directory (use /tmp in production)
 const uploadsDir = process.env.NODE_ENV === 'production' ? '/tmp/uploads' : './uploads';
 if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// Configure multer for file uploads with production settings
+// Configure multer for file uploads
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
         cb(null, uploadsDir);
@@ -85,7 +56,7 @@ const upload = multer({
     }
 });
 
-// Commission verification class with production optimizations
+// Commission verification class
 class CommissionVerifier {
     constructor() {
         this.COMMISSION_STRUCTURE = {
@@ -131,8 +102,9 @@ class CommissionVerifier {
     // Helper function to find column value with flexible naming
     getColumnValue(transaction, possibleNames) {
         for (const name of possibleNames) {
-            if (transaction[name] !== null && transaction[name] !== undefined && transaction[name] !== '') {
-                return transaction[name];
+            const value = transaction[name];
+            if (value !== null && value !== undefined && value !== '' && !isNaN(parseFloat(value))) {
+                return value;
             }
         }
         return null;
@@ -160,6 +132,13 @@ class CommissionVerifier {
                 rowNumber: rowIndex + 2,
                 commissions: {}
             };
+
+            // Debug logging for first few rows
+            if (rowIndex < 3) {
+                console.log(`Row ${rowIndex + 1}: Sales=${result.sales}, Invoice=${result.invoice}`);
+                console.log(`  Repeat: ${transaction['Repeat Product Commission'] || transaction['Repeat Commission']}`);
+                console.log(`  New: ${transaction['New Product Commission '] || transaction['New Product Commission']}`);
+            }
 
             // Check repeat product commission with flexible naming
             const repeatNames = ['Repeat Product Commission', 'Repeat Commission'];
@@ -222,32 +201,30 @@ class CommissionVerifier {
             console.log(`Processing ${detailData.length} detail rows`);
             const stateGroups = {};
 
-            // Process in chunks to avoid memory issues
-            const chunkSize = 100;
-            for (let i = 0; i < detailData.length; i += chunkSize) {
-                const chunk = detailData.slice(i, i + chunkSize);
+            // Group transactions by state
+            detailData.forEach((row, index) => {
+                const state = row.ShipToState;
+                const salesAmount = this.getSalesAmount(row);
                 
-                chunk.forEach((row, chunkIndex) => {
-                    const actualIndex = i + chunkIndex;
-                    const state = row.ShipToState;
-                    const salesAmount = this.getSalesAmount(row);
-                    
-                    if (!state || salesAmount <= 0) return;
+                if (index < 3) {
+                    console.log(`Grouping Row ${index + 1}: State=${state}, Sales=${salesAmount}`);
+                }
+                
+                if (!state || salesAmount <= 0) return;
 
-                    if (!stateGroups[state]) {
-                        stateGroups[state] = {
-                            transactions: [],
-                            totalSales: 0
-                        };
-                    }
+                if (!stateGroups[state]) {
+                    stateGroups[state] = {
+                        transactions: [],
+                        totalSales: 0
+                    };
+                }
 
-                    row.originalRowIndex = actualIndex;
-                    stateGroups[state].transactions.push(row);
-                    stateGroups[state].totalSales += salesAmount;
-                });
-            }
+                row.originalRowIndex = index;
+                stateGroups[state].transactions.push(row);
+                stateGroups[state].totalSales += salesAmount;
+            });
 
-            console.log(`Grouped into ${Object.keys(stateGroups).length} states`);
+            console.log(`Grouped into ${Object.keys(stateGroups).length} states:`, Object.keys(stateGroups));
 
             // Process each state
             const stateResults = [];
@@ -262,11 +239,13 @@ class CommissionVerifier {
                     const tier = this.getTier(stateData.totalSales);
                     const bonus = this.COMMISSION_STRUCTURE[tier].bonus;
                     
+                    console.log(`Processing state ${state}: ${stateData.totalSales} sales, tier ${tier}, bonus ${bonus}`);
+                    
                     let stateCalculatedCommission = 0;
                     let stateReportedCommission = 0;
                     const stateDiscrepancies = [];
 
-                    // Process transactions in smaller batches
+                    // Process transactions
                     stateData.transactions.forEach((transaction, index) => {
                         const processedTransaction = this.processTransaction(transaction, tier, transaction.originalRowIndex || index);
 
@@ -293,6 +272,8 @@ class CommissionVerifier {
                         });
                     });
 
+                    console.log(`State ${state} results: calculated=${stateCalculatedCommission}, reported=${stateReportedCommission}, discrepancies=${stateDiscrepancies.length}`);
+
                     stateResults.push({
                         state: state,
                         totalSales: stateData.totalSales,
@@ -314,6 +295,8 @@ class CommissionVerifier {
                 }
             });
 
+            console.log(`Final totals: calculated=${totalCalculatedCommission}, reported=${totalReportedCommission}, bonuses=${totalStateBonuses}, discrepancies=${totalDiscrepancies.length}`);
+
             return {
                 stateResults: stateResults,
                 totalCalculatedCommission: totalCalculatedCommission,
@@ -332,8 +315,14 @@ class CommissionVerifier {
         try {
             let actualPayment = 0;
             
+            console.log('Processing summary sheet with', summaryData.length, 'rows');
+            
             // Look for payment information in summary
-            summaryData.forEach(row => {
+            summaryData.forEach((row, index) => {
+                if (index < 3) {
+                    console.log(`Summary row ${index + 1}:`, Object.keys(row));
+                }
+                
                 Object.keys(row).forEach(key => {
                     const value = parseFloat(row[key]);
                     if (!isNaN(value) && value > 0) {
@@ -342,6 +331,7 @@ class CommissionVerifier {
                 });
             });
 
+            console.log('Actual payment found:', actualPayment);
             return { actualPayment };
         } catch (error) {
             console.error('Error processing summary sheet:', error);
@@ -355,7 +345,7 @@ app.get('/health', (req, res) => {
     res.json({ 
         status: 'healthy', 
         timestamp: new Date().toISOString(),
-        version: '2.0.0'
+        version: '2.0.1'
     });
 });
 
@@ -372,7 +362,7 @@ app.post('/verify-commission', upload.single('excelFile'), async (req, res) => {
         }
 
         filePath = req.file.path;
-        console.log(`Processing file: ${req.file.originalname}`);
+        console.log(`Processing file: ${req.file.originalname} (${req.file.size} bytes)`);
 
         // Read Excel file with error handling
         let workbook;
@@ -409,101 +399,83 @@ app.post('/verify-commission', upload.single('excelFile'), async (req, res) => {
             });
         }
 
-        // Process sheets with timeout protection
-        const processingTimeout = setTimeout(() => {
-            throw new Error('Processing timeout - file too large or complex');
-        }, 60000); // 60 second timeout
+        console.log(`Using sheets: ${detailSheetName}, ${summarySheetName}`);
 
-        try {
-            // Convert sheets to JSON
-            const detailSheet = workbook.Sheets[detailSheetName];
-            const summarySheet = workbook.Sheets[summarySheetName];
+        // Convert sheets to JSON
+        const detailSheet = workbook.Sheets[detailSheetName];
+        const summarySheet = workbook.Sheets[summarySheetName];
 
-            const detailData = XLSX.utils.sheet_to_json(detailSheet);
-            const summaryData = XLSX.utils.sheet_to_json(summarySheet);
+        const detailData = XLSX.utils.sheet_to_json(detailSheet);
+        const summaryData = XLSX.utils.sheet_to_json(summarySheet);
 
-            console.log(`DETAIL sheet: ${detailData.length} rows`);
-            console.log(`SUMMARY sheet: ${summaryData.length} rows`);
+        console.log(`DETAIL sheet: ${detailData.length} rows`);
+        console.log(`SUMMARY sheet: ${summaryData.length} rows`);
 
-            // Initialize verifier and process data
-            const verifier = new CommissionVerifier();
-            const calculatedResults = verifier.processDetailSheet(detailData);
-            const summaryResults = verifier.processSummarySheet(summaryData);
+        // Initialize verifier and process data
+        const verifier = new CommissionVerifier();
+        const calculatedResults = verifier.processDetailSheet(detailData);
+        const summaryResults = verifier.processSummarySheet(summaryData);
 
-            clearTimeout(processingTimeout);
+        // Build response
+        const response = {
+            summary: {
+                my_calculated_total: (calculatedResults.totalCalculatedCommission + calculatedResults.totalStateBonuses).toFixed(2),
+                my_calculated_commission: calculatedResults.totalCalculatedCommission.toFixed(2),
+                my_calculated_bonuses: calculatedResults.totalStateBonuses.toFixed(2),
+                detail_reported_commission: calculatedResults.totalReportedCommission.toFixed(2),
+                detail_reported_total: calculatedResults.totalReportedCommission.toFixed(2),
+                actual_payment: summaryResults.actualPayment.toFixed(2),
+                percentage_errors: Math.abs(calculatedResults.totalCalculatedCommission - calculatedResults.totalReportedCommission).toFixed(2),
+                payment_difference: ((calculatedResults.totalCalculatedCommission + calculatedResults.totalStateBonuses) - summaryResults.actualPayment).toFixed(2),
+                percentage_status: calculatedResults.discrepancies.length > 0 ? 'ERRORS FOUND' : 'CORRECT',
+                payment_status: Math.abs((calculatedResults.totalCalculatedCommission + calculatedResults.totalStateBonuses) - summaryResults.actualPayment) > 0.01 ? 
+                    ((calculatedResults.totalCalculatedCommission + calculatedResults.totalStateBonuses) > summaryResults.actualPayment ? 'UNDERPAID' : 'OVERPAID') : 'CORRECT',
+                total_discrepancies: calculatedResults.discrepancies.length
+            },
+            state_analysis: calculatedResults.stateResults.map(state => ({
+                state: state.state,
+                total_sales: state.totalSales.toFixed(2),
+                tier: state.tier,
+                my_calculated_commission: state.calculatedCommission.toFixed(2),
+                detail_reported_commission: state.reportedCommission.toFixed(2),
+                commission_difference: state.commissionDifference.toFixed(2),
+                bonus: state.bonus.toFixed(2),
+                transactions: state.transactions,
+                discrepancies_count: state.discrepancies.length
+            })),
+            discrepancies: calculatedResults.discrepancies.slice(0, 100).map(disc => ({
+                invoice: disc.invoice,
+                customer: disc.customer,
+                commission_type: disc.type,
+                sales_amount: disc.sales.toFixed(2),
+                tier: disc.tier,
+                my_calculated: disc.calculated.toFixed(2),
+                detail_reported: disc.reported.toFixed(2),
+                difference: disc.difference.toFixed(2),
+                status: disc.difference > 0 ? 'UNDERCALCULATED' : 'OVERCALCULATED',
+                row_number: disc.rowNumber,
+                cell_reference: disc.cellReference,
+                sheet_name: disc.sheetName
+            })),
+            commission_structure: {
+                tier1: "Tier 1 ($0-$9,999): Repeat 2%, New Product 3%",
+                tier2: "Tier 2 ($10k-$49.9k): Repeat 1%, New Product 2% + $100 bonus",
+                tier3: "Tier 3 ($50k+): Repeat 0.5%, New Product 1.5% + $300 bonus",
+                incentive: "Incentivized SKUs: Fixed 3%+"
+            }
+        };
 
-            // Build response
-            const response = {
-                summary: {
-                    my_calculated_total: (calculatedResults.totalCalculatedCommission + calculatedResults.totalStateBonuses).toFixed(2),
-                    my_calculated_commission: calculatedResults.totalCalculatedCommission.toFixed(2),
-                    my_calculated_bonuses: calculatedResults.totalStateBonuses.toFixed(2),
-                    detail_reported_commission: calculatedResults.totalReportedCommission.toFixed(2),
-                    detail_reported_total: calculatedResults.totalReportedCommission.toFixed(2),
-                    actual_payment: summaryResults.actualPayment.toFixed(2),
-                    percentage_errors: Math.abs(calculatedResults.totalCalculatedCommission - calculatedResults.totalReportedCommission).toFixed(2),
-                    payment_difference: ((calculatedResults.totalCalculatedCommission + calculatedResults.totalStateBonuses) - summaryResults.actualPayment).toFixed(2),
-                    percentage_status: calculatedResults.discrepancies.length > 0 ? 'ERRORS FOUND' : 'CORRECT',
-                    payment_status: Math.abs((calculatedResults.totalCalculatedCommission + calculatedResults.totalStateBonuses) - summaryResults.actualPayment) > 0.01 ? 
-                        ((calculatedResults.totalCalculatedCommission + calculatedResults.totalStateBonuses) > summaryResults.actualPayment ? 'UNDERPAID' : 'OVERPAID') : 'CORRECT',
-                    total_discrepancies: calculatedResults.discrepancies.length
-                },
-                state_analysis: calculatedResults.stateResults.map(state => ({
-                    state: state.state,
-                    total_sales: state.totalSales.toFixed(2),
-                    tier: state.tier,
-                    my_calculated_commission: state.calculatedCommission.toFixed(2),
-                    detail_reported_commission: state.reportedCommission.toFixed(2),
-                    commission_difference: state.commissionDifference.toFixed(2),
-                    bonus: state.bonus.toFixed(2),
-                    transactions: state.transactions,
-                    discrepancies_count: state.discrepancies.length
-                })),
-                discrepancies: calculatedResults.discrepancies.slice(0, 100).map(disc => ({ // Limit to first 100 discrepancies
-                    invoice: disc.invoice,
-                    customer: disc.customer,
-                    commission_type: disc.type,
-                    sales_amount: disc.sales.toFixed(2),
-                    tier: disc.tier,
-                    my_calculated: disc.calculated.toFixed(2),
-                    detail_reported: disc.reported.toFixed(2),
-                    difference: disc.difference.toFixed(2),
-                    status: disc.difference > 0 ? 'UNDERCALCULATED' : 'OVERCALCULATED',
-                    row_number: disc.rowNumber,
-                    cell_reference: disc.cellReference,
-                    sheet_name: disc.sheetName
-                })),
-                commission_structure: {
-                    tier1: "Tier 1 ($0-$9,999): Repeat 2%, New Product 3%",
-                    tier2: "Tier 2 ($10k-$49.9k): Repeat 1%, New Product 2% + $100 bonus",
-                    tier3: "Tier 3 ($50k+): Repeat 0.5%, New Product 1.5% + $300 bonus",
-                    incentive: "Incentivized SKUs: Fixed 3%+"
-                }
-            };
-
-            res.json(response);
-
-        } catch (processingError) {
-            clearTimeout(processingTimeout);
-            throw processingError;
-        }
+        console.log('Sending response with', response.summary.total_discrepancies, 'discrepancies');
+        res.json(response);
 
     } catch (error) {
         console.error('Verification error:', error);
         
-        // Return appropriate error response
-        if (error.message.includes('timeout')) {
-            res.status(408).json({
-                error: 'Processing timeout',
-                message: 'File is too large or complex to process. Please try with a smaller file.'
-            });
-        } else {
-            res.status(500).json({
-                error: 'Processing failed',
-                message: 'An error occurred while processing your file. Please try again.',
-                details: process.env.NODE_ENV === 'development' ? error.message : undefined
-            });
-        }
+        res.status(500).json({
+            error: 'Processing failed',
+            message: 'An error occurred while processing your file. Please try again.',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
     } finally {
         // Clean up uploaded file
         if (filePath && fs.existsSync(filePath)) {
@@ -535,21 +507,11 @@ app.use((error, req, res, next) => {
     });
 });
 
-// 404 handler
-app.use((req, res) => {
-    res.status(404).json({
-        error: 'Not found',
-        message: 'The requested resource was not found'
-    });
-});
-
 // Start server
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`✅ Production Commission Verification Server running on port ${PORT}`);
+    console.log(`✅ Commission Verification Server v2.0.1 running on port ${PORT}`);
     console.log(`📁 Upload directory: ${uploadsDir}`);
     console.log(`📊 Max file size: 50MB`);
-    console.log(`🔒 Security: Helmet enabled`);
-    console.log(`⚡ Rate limiting: Enabled`);
     console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
