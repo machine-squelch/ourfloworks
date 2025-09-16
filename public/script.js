@@ -356,6 +356,10 @@ const ResultsManager = {
                 stateSection.setAttribute('aria-hidden', 'false');
             }
 
+            // Allow CSS transition to calculate the correct height
+            const contentHeight = stateSection.scrollHeight;
+            stateSection.style.maxHeight = `${contentHeight}px`;
+            // Ensure section appears expanded for screen readers and keyboard users
             const stateHeader = document.getElementById('state-header');
             if (stateHeader) {
                 stateHeader.setAttribute('aria-expanded', 'true');
@@ -588,7 +592,7 @@ const CollapsibleManager = {
         }
 
         header.setAttribute('aria-expanded', expand.toString());
-        const icon = header.querySelector('.collapsible-icon svg');
+        const icon = header.querySelector('.collapsible-icon svg'); 
         if (icon) {
             icon.style.transform = expand ? 'rotate(180deg)' : 'rotate(0deg)';
         }
