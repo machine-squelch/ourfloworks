@@ -1,32 +1,6 @@
 /* Modern Commission Verification Web App Styles */
 /* World-class UI with excellent mobile compatibility */
 
-/* ===== PERFORMANCE OPTIMIZATIONS ===== */
-* {
-  box-sizing: border-box;
-}
-
-html {
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  text-rendering: optimizeLegibility;
-}
-
-body {
-  transform: translateZ(0); /* Force hardware acceleration */
-  -webkit-backface-visibility: hidden;
-  backface-visibility: hidden;
-}
-
-/* Optimize animations for better performance */
-/* Glass shine animations removed */
-
-/* Reduce repaints during hover */
-.summary-card,
-.table-container {
-  will-change: transform;
-}
-
 /* ===== CSS CUSTOM PROPERTIES ===== */
 :root {
   /* Spacing system - 8px base */
@@ -520,28 +494,6 @@ body {
   transition: transform var(--transition-normal) var(--ease-out-cubic);
 }
 
-/* Glass shine effect for tier cards */
-.tier-card::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 30%;
-  height: 100%;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255, 255, 255, 0.2),
-    rgba(255, 255, 255, 0.4),
-    rgba(255, 255, 255, 0.2),
-    transparent
-  );
-  animation: glassShine 4s ease-in-out infinite;
-  animation-delay: 1s;
-  pointer-events: none;
-  z-index: 1;
-}
-
 .tier-card:hover {
   transform: translateY(-4px);
   box-shadow: 
@@ -653,29 +605,6 @@ body {
   transition: all var(--transition-normal) var(--ease-out-cubic);
   margin-bottom: var(--space-lg);
   pointer-events: auto;
-  overflow: hidden;
-}
-
-/* Glass shine effect for upload dropzone */
-.upload-dropzone::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 30%;
-  height: 100%;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(0, 255, 255, 0.1),
-    rgba(0, 255, 255, 0.2),
-    rgba(0, 255, 255, 0.1),
-    transparent
-  );
-  animation: glassShine 4.5s ease-in-out infinite;
-  animation-delay: 1.5s;
-  pointer-events: none;
-  z-index: 1;
 }
 
 .upload-dropzone:hover,
@@ -729,30 +658,6 @@ body {
   border-radius: var(--border-radius);
   margin-bottom: var(--space-lg);
   animation: fileSlideIn 0.3s ease-out;
-  position: relative;
-  overflow: hidden;
-}
-
-/* Glass shine effect for file preview */
-.file-preview::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 30%;
-  height: 100%;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255, 255, 255, 0.15),
-    rgba(255, 255, 255, 0.25),
-    rgba(255, 255, 255, 0.15),
-    transparent
-  );
-  animation: glassShine 3s ease-in-out infinite;
-  animation-delay: 0.8s;
-  pointer-events: none;
-  z-index: 1;
 }
 
 @keyframes fileSlideIn {
@@ -1005,15 +910,6 @@ body {
   100% { transform: translateX(100%); }
 }
 
-/* Removed glass shine animation for better performance */
-
-.glass-shine {
-  position: relative;
-  overflow: hidden;
-}
-
-/* Glass shine effects removed for better performance */
-
 .progress-stats {
   display: flex;
   justify-content: space-between;
@@ -1064,11 +960,7 @@ body {
   box-shadow: var(--glass-shadow);
   text-align: center;
   transition: all var(--transition-normal) var(--ease-out-cubic);
-  position: relative;
-  overflow: hidden;
 }
-
-/* Glass shine effects removed for better performance */
 
 .summary-card:hover {
   transform: translateY(-2px);
@@ -1189,12 +1081,7 @@ body {
 .collapsible-content {
   max-height: 0;
   overflow: hidden;
-  opacity: 0;
-  transition: max-height 0.3s ease, opacity 0.3s ease;
-}
-
-.collapsible-content.expanded {
-  opacity: 1;
+  transition: max-height var(--transition-slow) var(--ease-out-cubic);
 }
 
 .discrepancy-count {
@@ -1219,10 +1106,7 @@ body {
   border: 1px solid var(--glass-border);
   background: var(--glass-bg);
   backdrop-filter: blur(10px);
-  position: relative;
 }
-
-/* Glass shine effects removed for better performance */
 
 .results-table {
   width: 100%;
@@ -1300,22 +1184,6 @@ body {
   text-align: center;
   padding: var(--space-2xl);
   color: var(--color-text-secondary);
-}
-
-/* Total row styling for discrepancies table */
-.total-row {
-  background: rgba(0, 255, 255, 0.1) !important;
-  border-top: 2px solid var(--color-neon-cyan);
-}
-
-.total-row td {
-  font-weight: 700;
-  color: var(--color-neon-cyan);
-  padding: var(--space-md) var(--space-sm);
-}
-
-.total-row:hover {
-  background: rgba(0, 255, 255, 0.15) !important;
 }
 
 .no-data-content {

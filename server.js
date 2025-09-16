@@ -1,527 +1,470 @@
-/**
- * Improved Commission Verification Server
- * 
- * This server implementation integrates the optimized commission calculator
- * and Excel processor to provide a robust, scalable solution.
- * 
- * Key improvements:
- * - Modular architecture with separation of concerns
- * - Streaming file processing with progress tracking
- * - Enhanced error handling and validation
- * - Security improvements for file uploads
- * - Performance monitoring and logging
- * - Graceful error recovery and cleanup
- */
-
 const express = require('express');
-const multer = require('multer');
 const cors = require('cors');
-const path = require('path');
+const multer = require('multer');
 const fs = require('fs');
-const rateLimit = require('express-rate-limit');
-const helmet = require('helmet');
+const path = require('path');
+const { Parser } = require('json2csv');
+const XLSX = require('xlsx');
 
-const OptimizedCommissionCalculator = require('./optimized_commission_calculator');
-const OptimizedExcelProcessor = require('./optimized_excel_processor');
+// Create uploads directory if it doesn't exist (DigitalOcean fix)
+const uploadsDir = './uploads';
+if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+    console.log('Created uploads directory');
+}
 
-class ImprovedCommissionServer {
-    constructor(options = {}) {
-        this.app = express();
-        this.options = {
-            port: options.port || process.env.PORT || 8080,
-            uploadDir: options.uploadDir || path.join(__dirname, 'uploads'),
-            maxFileSize: options.maxFileSize || 50 * 1024 * 1024, // 50MB
-            corsOrigin: options.corsOrigin || '*',
-            enableRateLimit: options.enableRateLimit !== false,
-            logLevel: options.logLevel || 'info',
-            ...options
+const app = express();
+const PORT = process.env.PORT || 8080;
+
+// Basic middleware
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true }));
+app.use(cors());
+app.use(express.static('public'));
+
+// Health check endpoint for DigitalOcean
+app.get('/health', (req, res) => {
+    res.status(200).json({ 
+        status: 'healthy', 
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        version: '2.0.0'
+    });
+});
+
+// Root endpoint
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Configure multer for Excel file uploads
+const upload = multer({ 
+    dest: 'uploads/',
+    limits: {
+        fileSize: 50 * 1024 * 1024 // 50MB limit
+    },
+    fileFilter: (req, file, cb) => {
+        // Accept Excel files
+        if (file.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+            file.mimetype === 'application/vnd.ms-excel' ||
+            file.originalname.toLowerCase().endsWith('.xlsx') ||
+            file.originalname.toLowerCase().endsWith('.xls')) {
+            cb(null, true);
+        } else {
+            cb(new Error('Only Excel files (.xlsx, .xls) are allowed'), false);
+        }
+    }
+});
+
+// Commission calculation class
+class CommissionCalculator {
+    constructor() {
+        // Official commission structure from PDF
+        this.COMMISSION_STRUCTURE = {
+            tier1: {
+                threshold: { min: 0, max: 9999.99 },
+                rates: { repeat: 0.02, new: 0.03, incentive: 0.03 },
+                bonus: 0
+            },
+            tier2: {
+                threshold: { min: 10000, max: 49999.99 },
+                rates: { repeat: 0.01, new: 0.02, incentive: 0.03 },
+                bonus: 100
+            },
+            tier3: {
+                threshold: { min: 50000, max: Infinity },
+                rates: { repeat: 0.005, new: 0.015, incentive: 0.03 },
+                bonus: 300
+            }
+        };
+    }
+
+    // Determine tier based on total sales
+    getTier(totalSales) {
+        if (totalSales <= this.COMMISSION_STRUCTURE.tier1.threshold.max) return 'tier1';
+        if (totalSales <= this.COMMISSION_STRUCTURE.tier2.threshold.max) return 'tier2';
+        return 'tier3';
+    }
+
+    // Calculate commission for a transaction based on commission type
+    calculateCommissionByType(transaction, tier, commissionType) {
+        const rates = this.COMMISSION_STRUCTURE[tier].rates;
+        const rate = rates[commissionType];
+        const salesAmount = this.getSalesAmount(transaction);
+        
+        return salesAmount * rate;
+    }
+
+    // Helper function to find column value with flexible naming
+    getColumnValue(transaction, possibleNames) {
+        for (const name of possibleNames) {
+            if (transaction[name] !== null && transaction[name] !== undefined && transaction[name] !== '') {
+                return transaction[name];
+            }
+        }
+        return null;
+    }
+
+    // Get sales amount with flexible column naming
+    getSalesAmount(transaction) {
+        const possibleNames = [
+            'Total Discounted Revenue',
+            'TOTAL REVENUE',
+            'Total Revenue',
+            'Revenue'
+        ];
+        const value = this.getColumnValue(transaction, possibleNames);
+        return parseFloat(value || 0);
+    }
+
+    // Process a single transaction and check all commission types
+    processTransaction(transaction, tier, rowIndex) {
+        const result = {
+            invoice: transaction.InvoiceNo,
+            customer: transaction.CustomerNo,
+            sales: this.getSalesAmount(transaction),
+            rowNumber: rowIndex + 2, // +2 because Excel is 1-based and has header row
+            commissions: {}
         };
 
-        this.commissionCalculator = new OptimizedCommissionCalculator();
-        this.excelProcessor = new OptimizedExcelProcessor({
-            maxFileSize: this.options.maxFileSize,
-            tempDir: path.join(this.options.uploadDir, 'temp')
-        });
-
-        this.activeProcessing = new Map(); // Track active processing sessions
-        this.setupMiddleware();
-        this.setupRoutes();
-        this.setupErrorHandling();
-    }
-
-    /**
-     * Setup Express middleware
-     */
-    setupMiddleware() {
-        // Trust proxy for DigitalOcean Apps and other reverse proxies
-        this.app.set('trust proxy', true);
-
-        // Security middleware
-        this.app.use(helmet({
-            contentSecurityPolicy: {
-                directives: {
-                    defaultSrc: ["'self'"],
-                    styleSrc: ["'self'", "'unsafe-inline'"],
-                    scriptSrc: ["'self'"],
-                    imgSrc: ["'self'", "data:", "blob:"],
-                },
-            },
-        }));
-
-        // CORS configuration
-        this.app.use(cors({
-            origin: this.options.corsOrigin,
-            methods: ['GET', 'POST', 'PUT', 'DELETE'],
-            allowedHeaders: ['Content-Type', 'Authorization'],
-            credentials: true
-        }));
-
-        // Rate limiting
-        if (this.options.enableRateLimit) {
-            const limiter = rateLimit({
-                windowMs: 15 * 60 * 1000, // 15 minutes
-                max: 100, // Limit each IP to 100 requests per windowMs
-                message: {
-                    error: 'Too many requests from this IP, please try again later.'
-                }
-            });
-            this.app.use('/api/', limiter);
+        // Check repeat product commission with flexible naming
+        const repeatNames = ['Repeat Product Commission', 'Repeat Commission'];
+        const repeatValue = this.getColumnValue(transaction, repeatNames);
+        if (repeatValue !== null) {
+            const calculated = this.calculateCommissionByType(transaction, tier, 'repeat');
+            const reported = parseFloat(repeatValue) || 0;
+            result.commissions.repeat = {
+                calculated: calculated,
+                reported: reported,
+                difference: calculated - reported,
+                cellReference: this.getCellReference(repeatNames, transaction, result.rowNumber)
+            };
         }
 
-        // Body parsing
-        this.app.use(express.json({ limit: '10mb' }));
-        this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+        // Check new product commission with flexible naming
+        const newNames = ['New Product Commission ', 'New Product Commission'];
+        const newValue = this.getColumnValue(transaction, newNames);
+        if (newValue !== null) {
+            const calculated = this.calculateCommissionByType(transaction, tier, 'new');
+            const reported = parseFloat(newValue) || 0;
+            result.commissions.new = {
+                calculated: calculated,
+                reported: reported,
+                difference: calculated - reported,
+                cellReference: this.getCellReference(newNames, transaction, result.rowNumber)
+            };
+        }
 
-        // Static files
-        this.app.use(express.static(path.join(__dirname, 'public')));
+        // Check incentive product commission with flexible naming
+        const incentiveNames = ['Incentive Product Commission', 'Incentive Commission'];
+        const incentiveValue = this.getColumnValue(transaction, incentiveNames);
+        if (incentiveValue !== null) {
+            const calculated = this.calculateCommissionByType(transaction, tier, 'incentive');
+            const reported = parseFloat(incentiveValue) || 0;
+            result.commissions.incentive = {
+                calculated: calculated,
+                reported: reported,
+                difference: calculated - reported,
+                cellReference: this.getCellReference(incentiveNames, transaction, result.rowNumber)
+            };
+        }
 
-        // Request logging
-        this.app.use((req, res, next) => {
-            const start = Date.now();
-            res.on('finish', () => {
-                const duration = Date.now() - start;
-                console.log(`${req.method} ${req.path} - ${res.statusCode} (${duration}ms)`);
-            });
-            next();
-        });
-
-        // Ensure upload directory exists
-        this.ensureUploadDir();
+        return result;
     }
 
-    /**
-     * Setup API routes
-     */
-    setupRoutes() {
-        // Health check endpoint
-        this.app.get('/api/health', (req, res) => {
-            res.json({
-                status: 'healthy',
-                timestamp: new Date().toISOString(),
-                version: '2.0.0',
-                activeProcessing: this.activeProcessing.size
-            });
-        });
-
-        // File upload configuration
-        const upload = multer({
-            dest: this.options.uploadDir,
-            limits: {
-                fileSize: this.options.maxFileSize,
-                files: 1
-            },
-            fileFilter: (req, file, cb) => {
-                const allowedTypes = [
-                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                    'application/vnd.ms-excel',
-                    'text/csv',
-                    'application/octet-stream' // Sometimes Excel files are detected as this
-                ];
-                
-                // Get file extension
-                const fileExtension = file.originalname.toLowerCase().split('.').pop();
-                const allowedExtensions = ['xlsx', 'xls', 'csv'];
-                
-                // Check both MIME type and file extension
-                const validMimeType = allowedTypes.includes(file.mimetype);
-                const validExtension = allowedExtensions.includes(fileExtension);
-                
-                if (validMimeType || validExtension) {
-                    console.log(`File accepted: ${file.originalname} (MIME: ${file.mimetype}, Ext: ${fileExtension})`);
-                    cb(null, true);
-                } else {
-                    console.log(`File rejected: ${file.originalname} (MIME: ${file.mimetype}, Ext: ${fileExtension})`);
-                    cb(new Error(`Invalid file type. Only Excel (.xlsx, .xls) and CSV files are allowed. Received: ${file.mimetype}`));
-                }
+    // Helper function to get cell reference for flexible column names
+    getCellReference(possibleNames, transaction, rowNumber) {
+        // Try to determine which column was actually used
+        for (let i = 0; i < possibleNames.length; i++) {
+            if (transaction[possibleNames[i]] !== null && transaction[possibleNames[i]] !== undefined && transaction[possibleNames[i]] !== '') {
+                // Return a generic reference since we don't know exact column positions for all formats
+                return `Row ${rowNumber}`;
             }
+        }
+        return `Row ${rowNumber}`;
+    }
+
+    // Process DETAIL sheet and calculate commissions
+    processDetailSheet(detailData) {
+        console.log(`Processing ${detailData.length} detail rows`);
+        const stateGroups = {};
+        const allTransactions = [];
+
+        // Group transactions by state to determine tiers
+        detailData.forEach((row, index) => {
+            const state = row.ShipToState;
+            const salesAmount = this.getSalesAmount(row);
+            
+            if (index < 3) {
+                console.log(`Row ${index + 1}: State=${state}, Sales=${salesAmount}, Repeat=${row['Repeat Commission']}, New=${row['New Product Commission']}`);
+            }
+            
+            if (!state || salesAmount <= 0) return;
+
+            if (!stateGroups[state]) {
+                stateGroups[state] = {
+                    transactions: [],
+                    totalSales: 0
+                };
+            }
+
+            // Preserve original row index for cell reference calculation
+            row.originalRowIndex = index;
+            stateGroups[state].transactions.push(row);
+            stateGroups[state].totalSales += salesAmount;
         });
 
-        // Commission verification endpoint
-        this.app.post('/api/verify-commission', upload.single('excelFile'), async (req, res) => {
-            const sessionId = this.generateSessionId();
+        console.log(`Grouped into ${Object.keys(stateGroups).length} states:`, Object.keys(stateGroups));
+
+        // Process each state and its transactions
+        const stateResults = [];
+        let totalCalculatedCommission = 0;
+        let totalReportedCommission = 0;
+        let totalStateBonuses = 0;
+        let totalDiscrepancies = [];
+
+        Object.keys(stateGroups).forEach(state => {
+            const stateData = stateGroups[state];
+            const tier = this.getTier(stateData.totalSales);
+            const bonus = this.COMMISSION_STRUCTURE[tier].bonus;
             
-            try {
-                if (!req.file) {
-                    return res.status(400).json({
-                        error: 'No file uploaded',
-                        sessionId
-                    });
-                }
+            let stateCalculatedCommission = 0;
+            let stateReportedCommission = 0;
+            const stateTransactions = [];
+            const stateDiscrepancies = [];
 
-                console.log(`Starting commission verification for session ${sessionId}`);
-                
-                // Track active processing
-                this.activeProcessing.set(sessionId, {
-                    startTime: Date.now(),
-                    fileName: req.file.originalname,
-                    fileSize: req.file.size,
-                    status: 'processing'
-                });
+            // Process each transaction in this state
+            stateData.transactions.forEach((transaction, index) => {
+                const processedTransaction = this.processTransaction(transaction, tier, transaction.originalRowIndex || index);
+                stateTransactions.push(processedTransaction);
 
-                // Setup progress tracking
-                const progressHandler = (progress) => {
-                    console.log(`Session ${sessionId} progress:`, progress);
-                    // In a real implementation, you might emit this via WebSocket
-                };
+                // Sum up commissions for this transaction
+                Object.keys(processedTransaction.commissions).forEach(type => {
+                    const comm = processedTransaction.commissions[type];
+                    stateCalculatedCommission += comm.calculated;
+                    stateReportedCommission += comm.reported;
 
-                this.excelProcessor.on('progress', progressHandler);
-                this.commissionCalculator.on('progress', progressHandler);
-
-                // Process Excel file
-                const excelResults = await this.excelProcessor.processExcelFile(req.file.path);
-                
-                // Initialize commission rules (in a real app, these would come from a database)
-                await this.initializeCommissionRules();
-                // Use Commission Verifier for simple shortfall calculation
-                const CommissionVerifier = require('./commission_verifier');
-                const verifier = new CommissionVerifier();
-                const verificationResults = verifier.verifyCommission(excelResults.sheets);
-
-                // Combine results
-                const finalResults = {
-                    sessionId,
-                    fileName: req.file.originalname,
-                    fileSize: req.file.size,
-                    processingTime: Date.now() - this.activeProcessing.get(sessionId).startTime,
-                    verification: verificationResults,
-                    summary: {
-                        shouldBePaid: verificationResults.shouldBePaid.totalCommission,
-                        wasPaid: verificationResults.wasPaid,
-                        shortfall: verificationResults.shortfall,
-                        isUnderpaid: verificationResults.verification.isUnderpaid
-                    },
-                    results: verificationResults.shouldBePaid,
-                    excel: {
-                        sheetsProcessed: Object.keys(excelResults.sheets).length,
-                        totalRows: excelResults.summary.totalRows,
-                        processedRows: excelResults.summary.processedRows,
-                        errors: excelResults.summary.errors
+                    // Track discrepancies
+                    if (Math.abs(comm.difference) > 0.01) { // Allow for small rounding differences
+                        stateDiscrepancies.push({
+                            invoice: processedTransaction.invoice,
+                            customer: processedTransaction.customer,
+                            type: type,
+                            sales: processedTransaction.sales,
+                            calculated: comm.calculated,
+                            reported: comm.reported,
+                            difference: comm.difference,
+                            tier: tier,
+                            rowNumber: processedTransaction.rowNumber,
+                            cellReference: comm.cellReference,
+                            sheetName: 'DETAIL'
+                        });
                     }
-                };
-
-                // Store results and clean up
-                this.activeProcessing.set(sessionId, {
-                    ...this.activeProcessing.get(sessionId),
-                    results: finalResults,
-                    status: 'completed'
                 });
-
-                // Clean up uploaded file
-                await this.excelProcessor.cleanup(req.file.path);
-
-                console.log(`✅ Commission verification completed for session ${sessionId}`);
-                res.json(finalResults);
-
-            } catch (error) {
-                console.error(`Error in session ${sessionId}:`, error);
-                
-                // Clean up on error
-                if (req.file) {
-                    await this.cleanup(req.file.path, sessionId);
-                }
-
-                res.status(500).json({
-                    error: error.message,
-                    sessionId,
-                    timestamp: new Date().toISOString()
-                });
-            }
-        });
-
-        // Processing status endpoint
-        this.app.get('/api/processing-status/:sessionId', (req, res) => {
-            const sessionId = req.params.sessionId;
-            const session = this.activeProcessing.get(sessionId);
-            
-            if (!session) {
-                return res.status(404).json({
-                    error: 'Session not found',
-                    sessionId
-                });
-            }
-
-            res.json({
-                sessionId,
-                ...session,
-                duration: Date.now() - session.startTime
             });
-        });
 
-        // Cancel processing endpoint
-        this.app.delete('/api/processing/:sessionId', (req, res) => {
-            const sessionId = req.params.sessionId;
-            const session = this.activeProcessing.get(sessionId);
-            
-            if (!session) {
-                return res.status(404).json({
-                    error: 'Session not found',
-                    sessionId
-                });
-            }
-
-            // Cancel processing
-            this.excelProcessor.cancelProcessing();
-            this.activeProcessing.delete(sessionId);
-
-            res.json({
-                message: 'Processing cancelled',
-                sessionId
+            stateResults.push({
+                state: state,
+                totalSales: stateData.totalSales,
+                tier: tier,
+                calculatedCommission: stateCalculatedCommission,
+                reportedCommission: stateReportedCommission,
+                commissionDifference: stateCalculatedCommission - stateReportedCommission,
+                bonus: bonus,
+                transactions: stateTransactions.length,
+                discrepancies: stateDiscrepancies
             });
+
+            totalCalculatedCommission += stateCalculatedCommission;
+            totalReportedCommission += stateReportedCommission;
+            totalStateBonuses += bonus;
+            totalDiscrepancies = totalDiscrepancies.concat(stateDiscrepancies);
         });
 
-        // System statistics endpoint
-        this.app.get('/api/stats', (req, res) => {
-            const memUsage = process.memoryUsage();
-            
-            res.json({
-                server: {
-                    uptime: process.uptime(),
-                    memory: {
-                        rss: Math.round(memUsage.rss / 1024 / 1024) + ' MB',
-                        heapTotal: Math.round(memUsage.heapTotal / 1024 / 1024) + ' MB',
-                        heapUsed: Math.round(memUsage.heapUsed / 1024 / 1024) + ' MB',
-                        external: Math.round(memUsage.external / 1024 / 1024) + ' MB'
-                    },
-                    activeProcessing: this.activeProcessing.size
-                },
-                processing: {
-                    excelProcessor: this.excelProcessor.getProcessingStatus(),
-                    activeSessions: Array.from(this.activeProcessing.entries()).map(([id, session]) => ({
-                        sessionId: id,
-                        ...session,
-                        duration: Date.now() - session.startTime
-                    }))
-                }
-            });
-        });
-
-        // Serve main application
-        this.app.get('/', (req, res) => {
-            res.sendFile(path.join(__dirname, 'public', 'index.html'));
-        });
+        return {
+            stateResults: stateResults,
+            totalCalculatedCommission: totalCalculatedCommission,
+            totalReportedCommission: totalReportedCommission,
+            totalStateBonuses: totalStateBonuses,
+            grandTotalCalculated: totalCalculatedCommission + totalStateBonuses,
+            grandTotalReported: totalReportedCommission + totalStateBonuses,
+            discrepancies: totalDiscrepancies
+        };
     }
 
-    /**
-     * Setup error handling
-     */
-    setupErrorHandling() {
-        // Handle multer errors
-        this.app.use((error, req, res, next) => {
-            if (error instanceof multer.MulterError) {
-                if (error.code === 'LIMIT_FILE_SIZE') {
-                    return res.status(400).json({
-                        error: `File too large. Maximum size is ${this.options.maxFileSize / 1024 / 1024}MB`
-                    });
-                }
-                return res.status(400).json({
-                    error: `Upload error: ${error.message}`
-                });
-            }
-            next(error);
-        });
+    // Extract actual payment from SUMMARY sheet
+    extractActualPayment(summaryData) {
+        // Look for the grand total row
+        const grandTotalRow = summaryData.find(row => 
+            row['Row Labels'] && row['Row Labels'].toString().toLowerCase().includes('grand total')
+        );
 
-        // Global error handler
-        this.app.use((error, req, res, next) => {
-            console.error('Unhandled error:', error);
+        if (grandTotalRow) {
+            // Look for the final total column (often unnamed or in last column)
+            const columns = Object.keys(grandTotalRow);
+            const lastColumn = columns[columns.length - 1];
             
-            res.status(500).json({
-                error: 'Internal server error',
-                message: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong',
-                timestamp: new Date().toISOString()
-            });
-        });
+            // Try different possible column names for actual payment
+            const possiblePaymentColumns = [
+                'Unnamed: 7', 'Total Paid', 'Actual Payment', 'Final Total', lastColumn
+            ];
 
-        // Handle 404
-        this.app.use((req, res) => {
-            res.status(404).json({
-                error: 'Not found',
-                path: req.path,
-                method: req.method
-            });
-        });
-    }
-
-    /**
-     * Initialize commission rules
-     */
-    async initializeCommissionRules() {
-        // Sample commission rules - in a real app, these would come from a database
-        const commissionRules = [
-            {
-                productType: 'Software',
-                salesRegion: 'North',
-                calculationType: 'percentage',
-                rate: 10,
-                type: 'newProduct',
-                priority: 1
-            },
-            {
-                productType: 'Hardware',
-                salesRegion: 'South',
-                calculationType: 'percentage',
-                rate: 8,
-                type: 'repeat',
-                priority: 1
-            },
-            {
-                calculationType: 'percentage',
-                rate: 5,
-                type: 'repeat',
-                priority: 0 // Default rule
+            for (const col of possiblePaymentColumns) {
+                if (grandTotalRow[col] && !isNaN(parseFloat(grandTotalRow[col]))) {
+                    return parseFloat(grandTotalRow[col]);
+                }
             }
-        ];
 
-        const stateRules = [
-            {
-                stateCode: 'CA',
-                type: 'bonus',
-                bonusType: 'percentage',
-                bonusRate: 2,
-                name: 'California Bonus'
-            },
-            {
-                stateCode: 'NY',
-                type: 'bonus',
-                bonusType: 'percentage',
-                bonusRate: 1.5,
-                name: 'New York Bonus'
-            },
-            {
-                stateCode: 'TX',
-                type: 'tax',
-                taxRate: 8.25,
-                name: 'Texas Sales Tax'
+            // Fallback: sum commission + state bonus if available
+            const commission = parseFloat(grandTotalRow['Sum of Total Commission'] || 0);
+            const stateBonus = parseFloat(grandTotalRow['ADDED STATE COMMISISON'] || 0);
+            
+            if (commission > 0) {
+                return commission + stateBonus;
             }
-        ];
+        }
 
-        this.commissionCalculator.initializeCommissionRules(commissionRules);
-        this.commissionCalculator.initializeStateRules(stateRules);
+        return 0;
     }
+}
 
-    /**
-     * Extract transactions from processed sheets
-     * @param {Object} sheets - Processed sheet data
-     * @returns {Array} Combined transaction data
-     */
-    extractTransactionsFromSheets(sheets) {
-        const transactions = [];
+// Main verification endpoint
+app.post('/verify-commission', upload.single('excelFile'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'No Excel file uploaded' });
+        }
+
+        console.log(`Processing Excel file: ${req.file.originalname}`);
+
+        // Read Excel file
+        const workbook = XLSX.readFile(req.file.path);
+        const sheetNames = workbook.SheetNames;
         
-        for (const [sheetName, sheetData] of Object.entries(sheets)) {
-            if (sheetData.data && Array.isArray(sheetData.data)) {
-                sheetData.data.forEach(row => {
-                    transactions.push({
-                        ...row,
-                        sourceSheet: sheetName
-                    });
-                });
-            }
+        console.log('Available sheets:', sheetNames);
+
+        // Find DETAIL and SUMMARY sheets (case insensitive, flexible naming)
+        const detailSheetName = sheetNames.find(name => 
+            name.toLowerCase().includes('detail')
+        );
+        const summarySheetName = sheetNames.find(name => 
+            name.toLowerCase().includes('summary')
+        );
+
+        if (!detailSheetName || !summarySheetName) {
+            return res.status(400).json({ 
+                error: 'Excel file must contain both DETAIL and SUMMARY sheets',
+                availableSheets: sheetNames
+            });
         }
 
-        console.log(`Extracted ${transactions.length} transactions from ${Object.keys(sheets).length} sheets`);
-        return transactions;
-    }
+        // Convert sheets to JSON
+        const detailSheet = workbook.Sheets[detailSheetName];
+        const summarySheet = workbook.Sheets[summarySheetName];
+        
+        const detailData = XLSX.utils.sheet_to_json(detailSheet);
+        const summaryData = XLSX.utils.sheet_to_json(summarySheet);
 
-    /**
-     * Generate unique session ID
-     * @returns {string} Session ID
-     */
-    generateSessionId() {
-        return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    }
+        console.log(`DETAIL sheet: ${detailData.length} rows`);
+        console.log(`SUMMARY sheet: ${summaryData.length} rows`);
 
-    /**
-     * Ensure upload directory exists
-     */
-    ensureUploadDir() {
-        if (!fs.existsSync(this.options.uploadDir)) {
-            fs.mkdirSync(this.options.uploadDir, { recursive: true });
-            console.log(`Created upload directory: ${this.options.uploadDir}`);
-        }
-    }
+        // Initialize calculator and process data
+        const calculator = new CommissionCalculator();
+        
+        // Calculate what SHOULD be paid from DETAIL sheet
+        const calculatedResults = calculator.processDetailSheet(detailData);
+        
+        // Extract what WAS actually paid from SUMMARY sheet
+        const actualPayment = calculator.extractActualPayment(summaryData);
 
-    /**
-     * Clean up files and session data
-     * @param {string} filePath - File path to clean up
-     * @param {string} sessionId - Session ID to clean up
-     */
-    async cleanup(filePath, sessionId) {
-        try {
-            // Remove uploaded file
-            if (fs.existsSync(filePath)) {
-                fs.unlinkSync(filePath);
-                console.log(`Cleaned up uploaded file: ${filePath}`);
+        // Calculate difference between my calculation and actual payment
+        const paymentDifference = calculatedResults.grandTotalCalculated - actualPayment;
+        
+        // Calculate difference between my calculation and what's reported in DETAIL sheet
+        const calculationDifference = calculatedResults.totalCalculatedCommission - calculatedResults.totalReportedCommission;
+
+        // Prepare response
+        const response = {
+            summary: {
+                // What I calculated should be paid
+                my_calculated_total: calculatedResults.grandTotalCalculated.toFixed(2),
+                my_calculated_commission: calculatedResults.totalCalculatedCommission.toFixed(2),
+                my_calculated_bonuses: calculatedResults.totalStateBonuses.toFixed(2),
+                
+                // What was reported in DETAIL sheet
+                detail_reported_commission: calculatedResults.totalReportedCommission.toFixed(2),
+                detail_reported_total: calculatedResults.grandTotalReported.toFixed(2),
+                
+                // What was actually paid (from SUMMARY sheet)
+                actual_payment: actualPayment.toFixed(2),
+                
+                // Differences
+                percentage_errors: calculationDifference.toFixed(2),
+                payment_difference: paymentDifference.toFixed(2),
+                
+                // Status
+                percentage_status: Math.abs(calculationDifference) < 0.01 ? 'CORRECT' : 'ERRORS FOUND',
+                payment_status: Math.abs(paymentDifference) < 0.01 ? 'CORRECT' : (paymentDifference > 0 ? 'UNDERPAID' : 'OVERPAID'),
+                
+                total_discrepancies: calculatedResults.discrepancies.length
+            },
+            state_analysis: calculatedResults.stateResults.map(state => ({
+                state: state.state,
+                total_sales: state.totalSales.toFixed(2),
+                tier: state.tier,
+                my_calculated_commission: state.calculatedCommission.toFixed(2),
+                detail_reported_commission: state.reportedCommission.toFixed(2),
+                commission_difference: state.commissionDifference.toFixed(2),
+                bonus: state.bonus.toFixed(2),
+                transactions: state.transactions,
+                discrepancies_count: state.discrepancies.length
+            })),
+            discrepancies: calculatedResults.discrepancies.map(disc => ({
+                invoice: disc.invoice,
+                customer: disc.customer,
+                commission_type: disc.type,
+                sales_amount: disc.sales.toFixed(2),
+                tier: disc.tier,
+                my_calculated: disc.calculated.toFixed(2),
+                detail_reported: disc.reported.toFixed(2),
+                difference: disc.difference.toFixed(2),
+                status: disc.difference > 0 ? 'UNDERCALCULATED' : 'OVERCALCULATED',
+                row_number: disc.rowNumber,
+                cell_reference: disc.cellReference,
+                sheet_name: disc.sheetName
+            })),
+            commission_structure: {
+                tier1: "Tier 1 ($0-$9,999): Repeat 2%, New Product 3%",
+                tier2: "Tier 2 ($10k-$49.9k): Repeat 1%, New Product 2% + $100 bonus",
+                tier3: "Tier 3 ($50k+): Repeat 0.5%, New Product 1.5% + $300 bonus",
+                incentive: "Incentivized SKUs: Fixed 3%+"
             }
+        };
 
-            // Remove session from active processing
-            this.activeProcessing.delete(sessionId);
+        // Clean up uploaded file
+        fs.unlinkSync(req.file.path);
 
-            // Clean up Excel processor
-            await this.excelProcessor.cleanup(filePath);
+        res.json(response);
 
-        } catch (error) {
-            console.error(`Error during cleanup for session ${sessionId}:`, error);
+    } catch (error) {
+        console.error('Verification error:', error);
+        
+        // Clean up file if it exists
+        if (req.file && fs.existsSync(req.file.path)) {
+            fs.unlinkSync(req.file.path);
         }
-    }
-
-    /**
-     * Start the server
-     * @returns {Promise} Server instance
-     */
-    async start() {
-        return new Promise((resolve, reject) => {
-            try {
-                const server = this.app.listen(this.options.port, '0.0.0.0', () => {
-                    console.log(`✅ Improved Commission Verification Server running on port ${this.options.port}`);
-                    console.log(`📁 Upload directory: ${this.options.uploadDir}`);
-                    console.log(`📊 Max file size: ${this.options.maxFileSize / 1024 / 1024}MB`);
-                    console.log(`🔒 Security: Helmet enabled`);
-                    console.log(`⚡ Rate limiting: ${this.options.enableRateLimit ? 'Enabled' : 'Disabled'}`);
-                    resolve(server);
-                });
-
-                server.on('error', reject);
-
-                // Graceful shutdown
-                process.on('SIGTERM', () => {
-                    console.log('SIGTERM received, shutting down gracefully');
-                    server.close(() => {
-                        console.log('Server closed');
-                        process.exit(0);
-                    });
-                });
-
-            } catch (error) {
-                reject(error);
-            }
+        
+        res.status(500).json({ 
+            error: 'Failed to process Excel file',
+            details: error.message
         });
     }
-}
+});
 
-// Start server if this file is run directly
-if (require.main === module) {
-    const server = new ImprovedCommissionServer();
-    server.start().catch(console.error);
-}
-
-module.exports = ImprovedCommissionServer;
+// Start server
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Commission Verification Server v2.0 running on port ${PORT}`);
+    console.log(`Access the application at: http://localhost:${PORT}`);
+    console.log('Now supports Excel files with DETAIL and SUMMARY sheets');
+});
 

@@ -1,21 +1,8 @@
-// Commission Verification App - Optimized for Performance
+// Application State Management
 const AppState = {
     currentFile: null,
     isProcessing: false,
     results: null
-};
-
-// Performance optimizations
-const debounce = (func, wait) => {
-    let timeout;
-    return function executedFunction(...args) {
-        const later = () => {
-            clearTimeout(timeout);
-            func(...args);
-        };
-        clearTimeout(timeout);
-        timeout = setTimeout(later, wait);
-    };
 };
 
 // Utility Functions
@@ -64,7 +51,7 @@ const Utils = {
 const FileUploadManager = {
     init() {
         const dropzone = document.getElementById('dropzone');
-        const fileInput = document.getElementById('excel-file');
+        const fileInput = document.getElementById('file-input');
         const removeBtn = document.getElementById('remove-file');
 
         if (!dropzone || !fileInput) return;
@@ -131,13 +118,14 @@ const FileUploadManager = {
         this.clearErrors();
 
         // Validate file type
-        const fileName = file.name.toLowerCase();
-        if (!fileName.endsWith('.xlsx') && !fileName.endsWith('.xls')) {
+        const validExtensions = ['.xlsx', '.xls'];
+        const fileExtension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
+        if (!validExtensions.includes(fileExtension)) {
             this.showError('Please select an Excel file (.xlsx or .xls) only.');
             return;
         }
 
-        // Validate file size (50MB limit)
+        // Validate file size (50MB limit for Excel files)
         const maxSize = 50 * 1024 * 1024; // 50MB
         if (file.size > maxSize) {
             this.showError('File size must be less than 50MB.');
@@ -149,7 +137,7 @@ const FileUploadManager = {
         this.showFilePreview(file);
         this.updateVerifyButton();
         
-        Utils.announce(`File ${file.name} selected successfully`);
+        Utils.announce(`Excel file ${file.name} selected successfully`);
     },
 
     showFilePreview(file) {
@@ -171,7 +159,7 @@ const FileUploadManager = {
         AppState.currentFile = null;
         
         const preview = document.getElementById('file-preview');
-        const fileInput = document.getElementById('excel-file');
+        const fileInput = document.getElementById('file-input');
         
         if (preview) preview.classList.add('hidden');
         if (fileInput) fileInput.value = '';
@@ -257,34 +245,18 @@ const ProgressManager = {
 
 // Results Manager
 const ResultsManager = {
-    show(response) {
-        // Handle the new API response structure
-        const results = response.results || response;
+    show(results) {
         AppState.results = results;
         
-        // Create summary object for compatibility
-        const summary = {
-            totalRows: results.excelProcessing?.totalRows || 0,
-            processedRows: results.excelProcessing?.processedRows || 0,
-            totalCommissionOwed: results.totalCommissionOwed || 0,
-            processingTime: results.processingTime || 0
-        };
-        
-        this.updateSummaryCards(summary);
-        this.updateCommissionBreakdown(results.commissionBreakdown || results.commission_breakdown);
-        this.updateStateAnalysis(results.stateAnalysis || results.state_analysis);
+        this.updateSummaryCards(results.summary);
+        this.updateCommissionBreakdown(results.commission_breakdown);
+        this.updateStateAnalysis(results.state_analysis);
         this.updateDiscrepancies(results.discrepancies);
         
         const section = document.getElementById('results-section');
         if (section) {
             section.classList.remove('hidden');
             Utils.scrollToElement('results-section');
-        }
-        
-        // Enable download button
-        const downloadBtn = document.getElementById('download-btn');
-        if (downloadBtn) {
-            downloadBtn.disabled = false;
         }
         
         Utils.announce('Verification results are now available');
@@ -295,129 +267,28 @@ const ResultsManager = {
             'total-transactions': summary.total_transactions,
             'total-states': summary.total_states,
             'calculated-commission': Utils.formatCurrency(summary.total_calculated_commission),
-            'reported-commission': Utils.formatCurrency(summary.total_reported_commission),
-            'state-bonuses': Utils.formatCurrency(summary.total_state_bonuses || 0)
+            'reported-commission': Utils.formatCurrency(summary.total_reported_commission)
         };
 
         Object.entries(elements).forEach(([id, value]) => {
             const element = document.getElementById(id);
             if (element) element.textContent = value;
         });
-        
-        // Update verification status based on difference
-        const statusElement = document.getElementById('verification-status');
-        if (statusElement) {
-            const difference = parseFloat(summary.difference || 0);
-            if (Math.abs(difference) < 0.01) {
-                statusElement.textContent = 'VERIFIED';
-                statusElement.className = 'card-value status-verified';
-            } else {
-                statusElement.textContent = 'DISCREPANCY';
-                statusElement.className = 'card-value status-discrepancy';
-            }
-        }
     },
 
     updateCommissionBreakdown(breakdown) {
-        // Update commission breakdown values
-        const elements = {
-            'repeat-commission': Utils.formatCurrency(breakdown.repeat || 0),
-            'new-commission': Utils.formatCurrency(breakdown.new || 0),
-            'incentive-commission': Utils.formatCurrency(breakdown.incentive || 0)
-        };
-
-        Object.entries(elements).forEach(([id, value]) => {
-            const element = document.getElementById(id);
-            if (element) element.textContent = value;
-        });
-        
-        console.log('Commission breakdown updated:', breakdown);
+        // Implementation for commission breakdown display
+        console.log('Commission breakdown:', breakdown);
     },
 
     updateStateAnalysis(stateAnalysis) {
-        const tableBody = document.querySelector('#state-table tbody');
-        if (!tableBody) return;
-        
-        // Clear existing rows
-        tableBody.innerHTML = '';
-        
-        if (!stateAnalysis || stateAnalysis.length === 0) {
-            const row = tableBody.insertRow();
-            row.innerHTML = '<td colspan="7" class="no-data">No state data available</td>';
-            return;
-        }
-        
-        // Populate table with state data
-        stateAnalysis.forEach(state => {
-            const row = tableBody.insertRow();
-            row.innerHTML = `
-                <td>${state.state}</td>
-                <td>${Utils.formatCurrency(state.total_sales)}</td>
-                <td class="tier-${state.tier}">${state.tier.toUpperCase()}</td>
-                <td>${Utils.formatCurrency(state.commission)}</td>
-                <td>${Utils.formatCurrency(state.reported)}</td>
-                <td>${Utils.formatCurrency(state.bonus)}</td>
-                <td>${state.transactions}</td>
-            `;
-        });
-        
-        console.log('State analysis updated:', stateAnalysis);
+        // Implementation for state analysis display
+        console.log('State analysis:', stateAnalysis);
     },
 
     updateDiscrepancies(discrepancies) {
-        const tableBody = document.querySelector('#discrepancies-table tbody');
-        const discrepancyCount = document.getElementById('discrepancy-count');
-        const totalOwedElement = document.getElementById('total-commission-owed');
-        
-        if (!tableBody) return;
-        
-        // Clear existing rows
-        tableBody.innerHTML = '';
-        
-        // Update discrepancy count
-        if (discrepancyCount) {
-            discrepancyCount.textContent = discrepancies ? discrepancies.length : 0;
-        }
-        
-        if (!discrepancies || discrepancies.length === 0) {
-            const row = tableBody.insertRow();
-            row.innerHTML = '<td colspan="5" class="no-data">No discrepancies found</td>';
-            if (totalOwedElement) {
-                totalOwedElement.innerHTML = '<strong>$0.00</strong>';
-            }
-            return;
-        }
-        
-        let totalOwed = 0;
-        
-        // Populate table with discrepancy data
-        discrepancies.forEach(discrepancy => {
-            const row = tableBody.insertRow();
-            const difference = parseFloat(discrepancy.difference);
-            const rowClass = difference > 0 ? 'positive-diff' : difference < 0 ? 'negative-diff' : '';
-            
-            // Add to total owed (only positive differences)
-            if (difference > 0) {
-                totalOwed += difference;
-            }
-            
-            row.className = rowClass;
-            row.innerHTML = `
-                <td>${discrepancy.invoice}</td>
-                <td>${discrepancy.state}</td>
-                <td>${Utils.formatCurrency(discrepancy.calculated)}</td>
-                <td>${Utils.formatCurrency(discrepancy.reported)}</td>
-                <td class="difference">${difference >= 0 ? '+' : ''}${Utils.formatCurrency(difference)}</td>
-            `;
-        });
-        
-        // Update total commission owed
-        if (totalOwedElement) {
-            totalOwedElement.innerHTML = `<strong>${Utils.formatCurrency(totalOwed)}</strong>`;
-        }
-        
-        console.log('Discrepancies updated:', discrepancies);
-        console.log('Total commission owed:', totalOwed);
+        // Implementation for discrepancies display
+        console.log('Discrepancies:', discrepancies);
     }
 };
 
@@ -441,9 +312,9 @@ const CommissionVerifier = {
             const formData = new FormData();
             formData.append('excelFile', AppState.currentFile);
 
-            ProgressManager.update(30, 'Uploading and parsing Excel data...');
+            ProgressManager.update(30, 'Uploading and processing Excel data...');
 
-            const response = await fetch('/api/verify-commission', {
+            const response = await fetch('/verify-commission', {
                 method: 'POST',
                 body: formData
             });
@@ -462,22 +333,6 @@ const CommissionVerifier = {
             setTimeout(() => {
                 ProgressManager.hide();
                 ResultsManager.show(results);
-                
-                // Store results for visualization page
-                sessionStorage.setItem('commissionResults', JSON.stringify(results));
-                
-                // Show link to visualizations
-                const visualizationLink = document.createElement('div');
-                visualizationLink.innerHTML = `
-                    <div style="margin-top: 20px; padding: 15px; background: #2a2a2a; border-radius: 8px; border-left: 4px solid #00ffff;">
-                        <h3 style="color: #00ffff; margin: 0 0 10px 0;">📊 Visual Analysis Available</h3>
-                        <p style="margin: 0 0 10px 0;">View detailed charts and graphs of your commission discrepancies.</p>
-                        <a href="/charts.html" target="_blank" style="color: #00ffff; text-decoration: none; font-weight: bold;">
-                            → Open Commission Visualization Dashboard
-                        </a>
-                    </div>
-                `;
-                document.getElementById('results').appendChild(visualizationLink);
             }, 1000);
 
         } catch (error) {
@@ -531,44 +386,6 @@ const TimeDisplay = {
     }
 };
 
-// Collapsible Section Manager
-const CollapsibleManager = {
-    init() {
-        const headers = document.querySelectorAll('.collapsible-header');
-        headers.forEach(header => {
-            header.addEventListener('click', this.toggleSection.bind(this));
-        });
-    },
-
-    toggleSection(event) {
-        const header = event.currentTarget;
-        const content = header.nextElementSibling;
-        const icon = header.querySelector('.collapsible-icon');
-        
-        if (!content || !icon) return;
-        
-        const isExpanded = header.getAttribute('aria-expanded') === 'true';
-        
-        // Toggle aria-expanded
-        header.setAttribute('aria-expanded', !isExpanded);
-        
-        // Toggle content visibility
-        if (isExpanded) {
-            content.style.maxHeight = '0';
-            content.style.opacity = '0';
-            icon.style.transform = 'rotate(0deg)';
-        } else {
-            content.style.maxHeight = content.scrollHeight + 'px';
-            content.style.opacity = '1';
-            icon.style.transform = 'rotate(180deg)';
-        }
-        
-        // Add transition classes
-        content.style.transition = 'max-height 0.3s ease, opacity 0.3s ease';
-        icon.style.transition = 'transform 0.3s ease';
-    }
-};
-
 // Application Initialization
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Commission Verifier initializing...');
@@ -576,7 +393,6 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialize all managers
     FileUploadManager.init();
     TimeDisplay.init();
-    CollapsibleManager.init();
     
     // Set up verify button handler
     const verifyBtn = document.getElementById('verify-btn');
