@@ -315,7 +315,7 @@ const ResultsManager = {
 
     updateStateAnalysis(stateAnalysis) {
         if (!stateAnalysis || !Array.isArray(stateAnalysis)) return;
-        
+
         const tableBody = document.querySelector('#state-table tbody');
         if (!tableBody) return;
         
@@ -335,11 +335,22 @@ const ResultsManager = {
             `;
             tableBody.appendChild(row);
         });
-        
+
         // Show the state analysis section
-        const stateSection = document.querySelector('#state-content');
+        const stateSection = document.getElementById('state-content');
+        const stateHeader = document.getElementById('state-header');
         if (stateSection) {
             stateSection.style.display = 'block';
+            stateSection.setAttribute('aria-hidden', 'false');
+
+            // Allow CSS transition to calculate the correct height
+            const contentHeight = stateSection.scrollHeight;
+            stateSection.style.maxHeight = `${contentHeight}px`;
+
+            // Ensure section appears expanded for screen readers and keyboard users
+            if (stateHeader) {
+                stateHeader.setAttribute('aria-expanded', 'true');
+            }
         }
     },
 
@@ -386,11 +397,20 @@ const ResultsManager = {
                 tableBody.appendChild(row);
             });
         }
-        
+
         // Show the discrepancies section
-        const discrepanciesSection = document.querySelector('#discrepancies-content');
+        const discrepanciesSection = document.getElementById('discrepancies-content');
+        const discrepanciesHeader = document.getElementById('discrepancies-header');
         if (discrepanciesSection) {
             discrepanciesSection.style.display = 'block';
+            discrepanciesSection.setAttribute('aria-hidden', 'false');
+
+            const contentHeight = discrepanciesSection.scrollHeight;
+            discrepanciesSection.style.maxHeight = `${contentHeight}px`;
+
+            if (discrepanciesHeader) {
+                discrepanciesHeader.setAttribute('aria-expanded', 'true');
+            }
         }
     }
 };
@@ -507,6 +527,15 @@ const CollapsibleManager = {
                     this.toggleSection(e);
                 }
             });
+
+            const contentId = header.getAttribute('aria-controls');
+            const content = document.getElementById(contentId);
+            if (!content) return;
+
+            const isExpanded = header.getAttribute('aria-expanded') === 'true';
+            content.style.display = isExpanded ? 'block' : 'none';
+            content.style.maxHeight = isExpanded ? `${content.scrollHeight}px` : '0px';
+            content.setAttribute('aria-hidden', isExpanded ? 'false' : 'true');
         });
     },
 
@@ -514,15 +543,37 @@ const CollapsibleManager = {
         const header = event.currentTarget;
         const content = document.getElementById(header.getAttribute('aria-controls'));
         const icon = header.querySelector('.collapsible-icon svg');
-        
+
         if (!content) return;
-        
+
         const isExpanded = header.getAttribute('aria-expanded') === 'true';
-        
+
         // Toggle expanded state
-        header.setAttribute('aria-expanded', !isExpanded);
-        content.style.display = isExpanded ? 'none' : 'block';
-        
+        header.setAttribute('aria-expanded', (!isExpanded).toString());
+
+        if (isExpanded) {
+            content.setAttribute('aria-hidden', 'true');
+            content.style.maxHeight = '0px';
+
+            const handleTransitionEnd = (event) => {
+                if (event.propertyName === 'max-height') {
+                    content.style.display = 'none';
+                    content.removeEventListener('transitionend', handleTransitionEnd);
+                }
+            };
+            content.addEventListener('transitionend', handleTransitionEnd);
+        } else {
+            content.style.display = 'block';
+            content.setAttribute('aria-hidden', 'false');
+
+            // Reset maxHeight before calculating to allow smooth transition
+            content.style.maxHeight = '0px';
+            const targetHeight = content.scrollHeight;
+            requestAnimationFrame(() => {
+                content.style.maxHeight = `${targetHeight}px`;
+            });
+        }
+
         // Rotate icon
         if (icon) {
             icon.style.transform = isExpanded ? 'rotate(0deg)' : 'rotate(180deg)';
