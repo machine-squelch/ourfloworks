@@ -355,10 +355,6 @@ const ResultsManager = {
                 stateSection.style.maxHeight = `${stateSection.scrollHeight}px`;
                 stateSection.setAttribute('aria-hidden', 'false');
             }
-
-            // Allow CSS transition to calculate the correct height
-            const contentHeight = stateSection.scrollHeight;
-            stateSection.style.maxHeight = `${contentHeight}px`;
             // Ensure section appears expanded for screen readers and keyboard users
             const stateHeader = document.getElementById('state-header');
             if (stateHeader) {
