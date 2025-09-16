@@ -296,7 +296,7 @@ body {
 
 .brand-title {
   font-family: 'Bebas Neue', 'Impact', 'Arial Black', 'Helvetica Neue', Arial, sans-serif;
-  font-size: clamp(var(--text-5xl), 10vw, 80px);
+  font-size: clamp(calc(var(--text-5xl) * 2), 14vw, 160px);
   font-weight: 900;
   line-height: 1.1;
   margin: 0 0 var(--space-sm) 0;
@@ -806,6 +806,15 @@ body {
   color: var(--color-text-primary);
 }
 
+.secondary-button:disabled,
+.secondary-button.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+  transform: none;
+  box-shadow: none;
+}
+
 .secondary-button:hover {
   background: var(--color-surface-hover);
   border-color: var(--color-neon-cyan);
@@ -986,6 +995,10 @@ body {
   font-weight: 700;
   color: var(--color-neon-cyan);
   font-family: 'JetBrains Mono', monospace;
+}
+
+.card-value.status-error {
+  color: var(--color-error);
 }
 
 .card-label {

@@ -133,6 +133,7 @@ const FileUploadManager = {
         }
 
         // Store file and update UI
+        ReportGenerator.disable();
         AppState.currentFile = file;
         this.showFilePreview(file);
         this.updateVerifyButton();
@@ -163,10 +164,12 @@ const FileUploadManager = {
         
         if (preview) preview.classList.add('hidden');
         if (fileInput) fileInput.value = '';
-        
+
         this.updateVerifyButton();
         this.clearErrors();
-        
+
+        ReportGenerator.disable();
+
         Utils.announce('File removed');
     },
 
@@ -248,7 +251,8 @@ const ResultsManager = {
     show(results) {
         console.log('Received results:', results);
         AppState.results = results;
-        
+        ReportGenerator.enable(results);
+
         this.updateSummaryCards(results);
         this.updateCommissionBreakdown(results);
         this.updateStateAnalysis(results.state_analysis);
@@ -273,14 +277,21 @@ const ResultsManager = {
         const elements = {
             'total-transactions': totalTransactions,
             'total-states': totalStates,
-            'calculated-commission': Utils.formatCurrency(parseFloat(results.summary?.my_calculated_total || 0)),
-            'verification-status': results.summary?.percentage_status || 'Complete'
+            'calculated-commission': Utils.formatCurrency(parseFloat(results.summary?.my_calculated_total || 0))
         };
 
         Object.entries(elements).forEach(([id, value]) => {
             const element = document.getElementById(id);
             if (element) element.textContent = value;
         });
+
+        const statusElement = document.getElementById('verification-status');
+        if (statusElement) {
+            const rawStatus = results.summary?.percentage_status ?? 'Complete';
+            const statusText = typeof rawStatus === 'string' ? rawStatus : String(rawStatus);
+            statusElement.textContent = statusText;
+            statusElement.classList.toggle('status-error', statusText.toUpperCase().includes('ERROR'));
+        }
     },
 
     updateCommissionBreakdown(results) {
@@ -315,7 +326,7 @@ const ResultsManager = {
 
     updateStateAnalysis(stateAnalysis) {
         if (!stateAnalysis || !Array.isArray(stateAnalysis)) return;
-        
+
         const tableBody = document.querySelector('#state-table tbody');
         if (!tableBody) return;
         
@@ -335,11 +346,20 @@ const ResultsManager = {
             `;
             tableBody.appendChild(row);
         });
-        
+
         // Show the state analysis section
-        const stateSection = document.querySelector('#state-content');
-        if (stateSection) {
-            stateSection.style.display = 'block';
+        if (!CollapsibleManager.expandSection('state-header')) {
+            const stateSection = document.getElementById('state-content');
+            if (stateSection) {
+                stateSection.style.display = 'block';
+                stateSection.style.maxHeight = `${stateSection.scrollHeight}px`;
+                stateSection.setAttribute('aria-hidden', 'false');
+            }
+
+            const stateHeader = document.getElementById('state-header');
+            if (stateHeader) {
+                stateHeader.setAttribute('aria-expanded', 'true');
+            }
         }
     },
 
@@ -386,11 +406,20 @@ const ResultsManager = {
                 tableBody.appendChild(row);
             });
         }
-        
+
         // Show the discrepancies section
-        const discrepanciesSection = document.querySelector('#discrepancies-content');
-        if (discrepanciesSection) {
-            discrepanciesSection.style.display = 'block';
+        if (!CollapsibleManager.expandSection('discrepancies-header')) {
+            const discrepanciesSection = document.getElementById('discrepancies-content');
+            if (discrepanciesSection) {
+                discrepanciesSection.style.display = 'block';
+                discrepanciesSection.style.maxHeight = `${discrepanciesSection.scrollHeight}px`;
+                discrepanciesSection.setAttribute('aria-hidden', 'false');
+            }
+
+            const discrepanciesHeader = document.getElementById('discrepancies-header');
+            if (discrepanciesHeader) {
+                discrepanciesHeader.setAttribute('aria-expanded', 'true');
+            }
         }
     }
 };
@@ -496,37 +525,580 @@ const CommissionVerifier = {
 
 // Collapsible sections handler
 const CollapsibleManager = {
+    sections: new Map(),
+
     init() {
-        // Add click handlers for collapsible sections
         const headers = document.querySelectorAll('.collapsible-header');
         headers.forEach(header => {
-            header.addEventListener('click', this.toggleSection.bind(this));
+            const contentId = header.getAttribute('aria-controls');
+            const content = document.getElementById(contentId);
+            if (!content) return;
+
+            this.sections.set(header.id, { header, content });
+
+            header.addEventListener('click', (event) => {
+                event.preventDefault();
+                this.toggle(header.id);
+            });
+
             header.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
-                    this.toggleSection(e);
+                    this.toggle(header.id);
                 }
             });
+
+            const isExpanded = header.getAttribute('aria-expanded') === 'true';
+            this.applyState(header, content, isExpanded, false);
         });
     },
 
-    toggleSection(event) {
-        const header = event.currentTarget;
-        const content = document.getElementById(header.getAttribute('aria-controls'));
-        const icon = header.querySelector('.collapsible-icon svg');
-        
-        if (!content) return;
-        
-        const isExpanded = header.getAttribute('aria-expanded') === 'true';
-        
-        // Toggle expanded state
-        header.setAttribute('aria-expanded', !isExpanded);
-        content.style.display = isExpanded ? 'none' : 'block';
-        
-        // Rotate icon
-        if (icon) {
-            icon.style.transform = isExpanded ? 'rotate(0deg)' : 'rotate(180deg)';
+    toggle(headerId) {
+        const entry = this.sections.get(headerId);
+        if (!entry) return;
+
+        const shouldExpand = entry.header.getAttribute('aria-expanded') !== 'true';
+        this.applyState(entry.header, entry.content, shouldExpand, true);
+    },
+
+    expandSection(headerId, options = {}) {
+        const entry = this.sections.get(headerId);
+        if (!entry) return false;
+
+        const { animate = false } = options;
+        this.applyState(entry.header, entry.content, true, animate);
+        return true;
+    },
+
+    collapseSection(headerId, options = {}) {
+        const entry = this.sections.get(headerId);
+        if (!entry) return false;
+
+        const { animate = false } = options;
+        this.applyState(entry.header, entry.content, false, animate);
+        return true;
+    },
+
+    applyState(header, content, expand, animate) {
+        if (!header || !content) return;
+
+        if (content._collapseListener) {
+            content.removeEventListener('transitionend', content._collapseListener);
+            content._collapseListener = null;
         }
+
+        header.setAttribute('aria-expanded', expand.toString());
+        const icon = header.querySelector('.collapsible-icon svg');
+        if (icon) {
+            icon.style.transform = expand ? 'rotate(180deg)' : 'rotate(0deg)';
+        }
+
+        if (expand) {
+            content.setAttribute('aria-hidden', 'false');
+            content.style.display = 'block';
+
+            const setHeight = () => {
+                const targetHeight = content.scrollHeight;
+                content.style.maxHeight = `${targetHeight}px`;
+            };
+
+            if (animate) {
+                content.style.maxHeight = '0px';
+                requestAnimationFrame(setHeight);
+            } else {
+                setHeight();
+            }
+        } else {
+            content.setAttribute('aria-hidden', 'true');
+
+            const finalizeCollapse = () => {
+                if (header.getAttribute('aria-expanded') === 'false') {
+                    content.style.display = 'none';
+                    content.style.maxHeight = '0px';
+                }
+
+                if (content._collapseListener) {
+                    content.removeEventListener('transitionend', content._collapseListener);
+                    content._collapseListener = null;
+                }
+            };
+
+            if (animate) {
+                const startHeight = content.scrollHeight;
+                if (startHeight === 0) {
+                    finalizeCollapse();
+                    return;
+                }
+
+                content.style.maxHeight = `${startHeight}px`;
+                requestAnimationFrame(() => {
+                    content.style.maxHeight = '0px';
+                });
+
+                const handleTransitionEnd = (event) => {
+                    if (event.propertyName !== 'max-height') return;
+                    finalizeCollapse();
+                };
+
+                content._collapseListener = handleTransitionEnd;
+                content.addEventListener('transitionend', handleTransitionEnd);
+            } else {
+                finalizeCollapse();
+            }
+        }
+    }
+};
+
+// Detailed PDF report generator
+const ReportGenerator = {
+    button: null,
+    libraryPromise: null,
+    lastResults: null,
+    margin: 48,
+    lineHeight: 14,
+    maxDiscrepancyEntries: 15,
+
+    init() {
+        this.button = document.getElementById('download-btn');
+        if (!this.button) return;
+
+        this.disable();
+        this.button.addEventListener('click', async (event) => {
+            event.preventDefault();
+
+            const results = AppState.results || this.lastResults;
+            if (!results) {
+                alert('Upload and verify a commission file before downloading the report.');
+                return;
+            }
+
+            this.button.setAttribute('aria-busy', 'true');
+            this.button.classList.add('is-generating');
+
+            try {
+                await this.download(results);
+            } catch (error) {
+                console.error('Report generation failed:', error);
+                alert('Unable to generate the PDF report. Please try again.');
+            } finally {
+                this.button.classList.remove('is-generating');
+                this.button.removeAttribute('aria-busy');
+            }
+        });
+    },
+
+    enable(results) {
+        if (!this.button) return;
+        this.lastResults = results || AppState.results;
+        this.button.disabled = false;
+        this.button.classList.remove('disabled');
+        this.button.setAttribute('aria-disabled', 'false');
+        this.button.title = 'Download a PDF summary of the verification results';
+    },
+
+    disable() {
+        if (!this.button) return;
+        this.lastResults = null;
+        this.button.disabled = true;
+        this.button.classList.add('disabled');
+        this.button.setAttribute('aria-disabled', 'true');
+        this.button.title = 'Run a verification to enable report downloads';
+    },
+
+    async download(results) {
+        if (!results) {
+            throw new Error('No verification results available for report generation');
+        }
+
+        const jsPDFConstructor = await this.ensureLibrary();
+        const doc = new jsPDFConstructor({
+            orientation: 'portrait',
+            unit: 'pt',
+            format: 'letter'
+        });
+
+        const margin = this.margin;
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const contentWidth = pageWidth - margin * 2;
+        let y = margin;
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(28);
+        doc.setTextColor(0, 0, 0);
+        doc.text('Commission Verification Report', margin, y);
+        y += this.lineHeight * 2;
+
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(12);
+
+        const headerLines = [
+            `Generated: ${new Date().toLocaleString()}`,
+            AppState.currentFile ? `Source File: ${AppState.currentFile.name}` : null,
+            `Discrepancies Identified: ${(Array.isArray(results.discrepancies) ? results.discrepancies.length : 0).toLocaleString('en-US')}`
+        ].filter(Boolean);
+
+        headerLines.forEach(line => {
+            const wrapped = this.wrapText(doc, line, contentWidth);
+            const requiredHeight = Math.max(this.lineHeight, wrapped.length * this.lineHeight);
+            y = this.ensureSpace(doc, y, margin, requiredHeight);
+            wrapped.forEach(wrappedLine => {
+                doc.text(wrappedLine, margin, y);
+                y += this.lineHeight;
+            });
+        });
+
+        y += 4;
+        doc.setDrawColor(200, 200, 200);
+        doc.line(margin, y, pageWidth - margin, y);
+        y += 20;
+
+        y = this.addSummary(doc, results, margin, contentWidth, y);
+        y = this.addStateHighlights(doc, results, margin, contentWidth, y);
+        y = this.addDiscrepancies(doc, results, margin, contentWidth, y);
+
+        doc.save(`commission-report-${this.formatDateForFilename(new Date())}.pdf`);
+        Utils.announce('Detailed PDF report downloaded');
+    },
+
+    async ensureLibrary() {
+        if (window.jspdf?.jsPDF) {
+            return window.jspdf.jsPDF;
+        }
+
+        if (!this.libraryPromise) {
+            this.libraryPromise = new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+                script.async = true;
+                script.onload = () => {
+                    if (window.jspdf?.jsPDF) {
+                        resolve(window.jspdf.jsPDF);
+                    } else {
+                        reject(new Error('PDF library loaded but jsPDF is unavailable'));
+                    }
+                };
+                script.onerror = () => reject(new Error('Failed to load PDF library'));
+                document.head.appendChild(script);
+            });
+        }
+
+        try {
+            const jsPDFConstructor = await this.libraryPromise;
+            if (!jsPDFConstructor) {
+                throw new Error('PDF library unavailable after loading');
+            }
+            return jsPDFConstructor;
+        } catch (error) {
+            this.libraryPromise = null;
+            throw error;
+        }
+    },
+
+    addSummary(doc, results, margin, width, y) {
+        y = this.addSectionTitle(doc, 'Summary', margin, y);
+
+        const summary = results.summary || {};
+        const totalTransactions = Array.isArray(results.state_analysis)
+            ? results.state_analysis.reduce((sum, state) => sum + (this.parseInteger(state.transactions) ?? 0), 0)
+            : 0;
+        const totalStates = Array.isArray(results.state_analysis) ? results.state_analysis.length : 0;
+        const discrepancyCount = typeof summary.total_discrepancies === 'number'
+            ? summary.total_discrepancies
+            : (Array.isArray(results.discrepancies) ? results.discrepancies.length : 0);
+
+        const summaryItems = [
+            { label: 'Total Transactions Reviewed', value: totalTransactions.toLocaleString('en-US') },
+            { label: 'States Included', value: totalStates.toLocaleString('en-US') },
+            { label: 'Calculated Commission', value: this.formatCurrencyValue(summary.my_calculated_commission) },
+            { label: 'Calculated Bonuses', value: this.formatCurrencyValue(summary.my_calculated_bonuses) },
+            { label: 'Calculated Total', value: this.formatCurrencyValue(summary.my_calculated_total) },
+            { label: 'Reported Detail Total', value: this.formatCurrencyValue(summary.detail_reported_total) },
+            { label: 'Actual Payment (Summary)', value: this.formatCurrencyValue(summary.actual_payment) },
+            { label: 'Payment Difference vs Actual', value: this.formatCurrencyValue(summary.payment_difference), color: this.shouldHighlightDifference(summary.payment_difference) ? 'error' : 'default' },
+            { label: 'Payment Status', value: summary.payment_status || 'Unknown', color: summary.payment_status && summary.payment_status !== 'CORRECT' ? 'error' : 'default' },
+            { label: 'Verification Status', value: summary.percentage_status || 'Complete', color: this.isErrorStatus(summary.percentage_status) ? 'error' : 'default' },
+            { label: 'Discrepancies Found', value: discrepancyCount.toLocaleString('en-US'), color: discrepancyCount > 0 ? 'error' : 'default' }
+        ];
+
+        const labelWidth = Math.min(240, width * 0.45);
+        const valueWidth = Math.max(120, width - labelWidth);
+
+        summaryItems.forEach(item => {
+            const valueText = String(item.value ?? '');
+            const wrappedValue = this.wrapText(doc, valueText, valueWidth);
+            const requiredHeight = Math.max(this.lineHeight + 4, wrappedValue.length * this.lineHeight + 4);
+            y = this.ensureSpace(doc, y, margin, requiredHeight);
+
+            doc.setTextColor(0, 0, 0);
+            doc.setFont('helvetica', 'bold');
+            doc.text(item.label, margin, y);
+
+            const color = item.color === 'error' ? [220, 53, 69] : [0, 0, 0];
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(...color);
+            wrappedValue.forEach((line, index) => {
+                doc.text(line, margin + labelWidth, y + (index * this.lineHeight));
+            });
+
+            y += wrappedValue.length * this.lineHeight + 8;
+        });
+
+        doc.setTextColor(0, 0, 0);
+        doc.setFont('helvetica', 'normal');
+        return y;
+    },
+
+    addStateHighlights(doc, results, margin, width, y) {
+        const states = Array.isArray(results.state_analysis) ? results.state_analysis : [];
+        if (!states.length) {
+            return y;
+        }
+
+        const topStates = states
+            .map(state => ({
+                data: state,
+                difference: this.parseNumber(state.commission_difference) ?? 0,
+                discrepancies: this.parseInteger(state.discrepancies_count) ?? 0
+            }))
+            .sort((a, b) => Math.abs(b.difference) - Math.abs(a.difference))
+            .slice(0, Math.min(5, states.length));
+
+        if (!topStates.length) {
+            return y;
+        }
+
+        y = this.addSectionTitle(doc, 'State Highlights', margin, y);
+        doc.setFont('helvetica', 'italic');
+        doc.setTextColor(100, 100, 100);
+        doc.text('Top states ranked by commission variance', margin, y);
+        y += this.lineHeight + 4;
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(0, 0, 0);
+
+        topStates.forEach(entry => {
+            const state = entry.data;
+            const header = `${state.state || 'N/A'} — ${this.formatCurrencyValue(state.total_sales)} in Sales`;
+            const headerLines = this.wrapText(doc, header, width);
+            const detailEntries = [
+                { text: `Tier ${state.tier || 'N/A'} • Transactions: ${this.formatCount(state.transactions)}`, color: 'default' },
+                { text: `Calculated vs Reported: ${this.formatCurrencyValue(state.my_calculated_commission)} vs ${this.formatCurrencyValue(state.detail_reported_commission)}`, color: 'default' },
+                { text: `Bonuses: ${this.formatCurrencyValue(state.bonus)}`, color: 'default' },
+                { text: `Commission Difference: ${this.formatCurrencyValue(state.commission_difference)}`, color: Math.abs(entry.difference) > 0.01 ? 'error' : 'default' },
+                { text: `Discrepancies Logged: ${this.formatCount(state.discrepancies_count)}`, color: entry.discrepancies > 0 ? 'error' : 'default' }
+            ];
+
+            detailEntries.forEach(item => {
+                item.lines = this.wrapText(doc, item.text, width);
+            });
+
+            const requiredHeight = headerLines.length * this.lineHeight +
+                detailEntries.reduce((sum, item) => sum + item.lines.length * this.lineHeight, 0) + 16;
+
+            y = this.ensureSpace(doc, y, margin, requiredHeight);
+
+            doc.setFont('helvetica', 'bold');
+            headerLines.forEach((line, index) => {
+                doc.text(line, margin, y + (index * this.lineHeight));
+            });
+
+            let blockBottom = y + headerLines.length * this.lineHeight;
+            doc.setFont('helvetica', 'normal');
+
+            detailEntries.forEach(item => {
+                item.lines.forEach(line => {
+                    blockBottom += this.lineHeight;
+                    if (item.color === 'error') {
+                        doc.setTextColor(220, 53, 69);
+                    } else {
+                        doc.setTextColor(0, 0, 0);
+                    }
+                    doc.text(line, margin, blockBottom);
+                });
+            });
+
+            doc.setTextColor(0, 0, 0);
+            y = blockBottom + 12;
+        });
+
+        return y;
+    },
+
+    addDiscrepancies(doc, results, margin, width, y) {
+        const discrepancies = Array.isArray(results.discrepancies) ? results.discrepancies : [];
+
+        y = this.addSectionTitle(doc, 'Detailed Discrepancies', margin, y);
+        doc.setFont('helvetica', 'italic');
+        doc.setTextColor(100, 100, 100);
+        doc.text('Each variance references the original Excel cell for rapid manager review.', margin, y);
+        y += this.lineHeight + 4;
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(0, 0, 0);
+
+        if (!discrepancies.length) {
+            y = this.ensureSpace(doc, y, margin, this.lineHeight);
+            doc.text('No discrepancies were detected — reported and calculated totals align.', margin, y);
+            return y + this.lineHeight;
+        }
+
+        discrepancies.slice(0, this.maxDiscrepancyEntries).forEach((discrepancy, index) => {
+            const header = `${index + 1}. Invoice ${discrepancy.invoice || 'N/A'} — ${discrepancy.customer || 'Unknown State'}`;
+            const headerLines = this.wrapText(doc, header, width);
+            const commissionType = this.formatCommissionType(discrepancy.commission_type);
+            const diffNumber = this.parseNumber(discrepancy.difference) ?? 0;
+
+            const detailEntries = [
+                { text: `Sales Amount: ${this.formatCurrencyValue(discrepancy.sales_amount)} (${commissionType})`, color: 'default' },
+                { text: `Calculated vs Reported: ${this.formatCurrencyValue(discrepancy.my_calculated)} vs ${this.formatCurrencyValue(discrepancy.detail_reported)}`, color: 'default' },
+                { text: `Difference: ${this.formatCurrencyValue(discrepancy.difference)} (${discrepancy.status || 'Status Unknown'})`, color: Math.abs(diffNumber) > 0.01 ? 'error' : 'default' },
+                { text: `Excel Reference: ${this.formatSheetReference(discrepancy)}`, color: 'default' }
+            ];
+
+            detailEntries.forEach(item => {
+                item.lines = this.wrapText(doc, item.text, width);
+            });
+
+            const requiredHeight = headerLines.length * this.lineHeight +
+                detailEntries.reduce((sum, item) => sum + item.lines.length * this.lineHeight, 0) + 24;
+
+            y = this.ensureSpace(doc, y, margin, requiredHeight);
+
+            doc.setFont('helvetica', 'bold');
+            headerLines.forEach((line, lineIndex) => {
+                doc.text(line, margin, y + (lineIndex * this.lineHeight));
+            });
+
+            let blockBottom = y + headerLines.length * this.lineHeight;
+            doc.setFont('helvetica', 'normal');
+
+            detailEntries.forEach(item => {
+                item.lines.forEach(line => {
+                    blockBottom += this.lineHeight;
+                    if (item.color === 'error') {
+                        doc.setTextColor(220, 53, 69);
+                    } else {
+                        doc.setTextColor(0, 0, 0);
+                    }
+                    doc.text(line, margin, blockBottom);
+                });
+            });
+
+            doc.setTextColor(0, 0, 0);
+            y = blockBottom + 16;
+        });
+
+        if (discrepancies.length > this.maxDiscrepancyEntries) {
+            const remaining = discrepancies.length - this.maxDiscrepancyEntries;
+            const notice = `+${remaining} additional discrepancies not shown in this summary.`;
+            const noticeLines = this.wrapText(doc, notice, width);
+            const requiredHeight = noticeLines.length * this.lineHeight + 6;
+            y = this.ensureSpace(doc, y, margin, requiredHeight);
+            doc.setFont('helvetica', 'italic');
+            doc.setTextColor(100, 100, 100);
+            noticeLines.forEach((line, idx) => {
+                doc.text(line, margin, y + (idx * this.lineHeight));
+            });
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(0, 0, 0);
+            y += noticeLines.length * this.lineHeight + 4;
+        }
+
+        return y;
+    },
+
+    addSectionTitle(doc, title, margin, y) {
+        y = this.ensureSpace(doc, y, margin, this.lineHeight * 2);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(16);
+        doc.setTextColor(0, 0, 0);
+        doc.text(title, margin, y);
+        y += this.lineHeight + 4;
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(12);
+        return y;
+    },
+
+    ensureSpace(doc, y, margin, required = 0) {
+        const pageHeight = doc.internal.pageSize.getHeight();
+        if (y + required > pageHeight - margin) {
+            doc.addPage();
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(12);
+            return margin;
+        }
+        return y;
+    },
+
+    wrapText(doc, text, width) {
+        const value = text ?? '';
+        if (!width || width <= 0) {
+            return [String(value)];
+        }
+        return doc.splitTextToSize(String(value), width);
+    },
+
+    parseNumber(value) {
+        if (typeof value === 'number') {
+            return Number.isFinite(value) ? value : null;
+        }
+        if (typeof value === 'string') {
+            const cleaned = value.replace(/[^0-9.-]+/g, '');
+            if (!cleaned) return null;
+            const parsed = parseFloat(cleaned);
+            return Number.isFinite(parsed) ? parsed : null;
+        }
+        return null;
+    },
+
+    parseInteger(value) {
+        if (typeof value === 'number') {
+            return Number.isFinite(value) ? Math.round(value) : null;
+        }
+        if (typeof value === 'string') {
+            const cleaned = value.replace(/[^0-9-]+/g, '');
+            if (!cleaned) return null;
+            const parsed = parseInt(cleaned, 10);
+            return Number.isNaN(parsed) ? null : parsed;
+        }
+        return null;
+    },
+
+    formatCount(value) {
+        const num = this.parseInteger(value);
+        return num === null ? '0' : num.toLocaleString('en-US');
+    },
+
+    formatCurrencyValue(value) {
+        const num = this.parseNumber(value);
+        return num === null ? 'N/A' : Utils.formatCurrency(num);
+    },
+
+    shouldHighlightDifference(value) {
+        const num = this.parseNumber(value);
+        return num !== null && Math.abs(num) > 0.01;
+    },
+
+    isErrorStatus(status) {
+        return typeof status === 'string' && status.toUpperCase().includes('ERROR');
+    },
+
+    formatCommissionType(type) {
+        if (!type) return 'Commission';
+        const normalised = type.replace(/_/g, ' ');
+        return normalised.replace(/\w\S*/g, word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
+    },
+
+    formatSheetReference(discrepancy) {
+        if (!discrepancy) return 'DETAIL!N/A';
+        const sheet = discrepancy.sheet_name || 'DETAIL';
+        const cell = discrepancy.cell_reference || 'N/A';
+        const rowNumber = this.parseInteger(discrepancy.row_number);
+        const rowLabel = rowNumber === null ? 'Row N/A' : `Row ${rowNumber}`;
+        return `${sheet}!${cell} (${rowLabel})`;
+    },
+
+    formatDateForFilename(date) {
+        const pad = (num) => String(num).padStart(2, '0');
+        return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}`;
     }
 };
 
@@ -559,6 +1131,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialize all managers
     FileUploadManager.init();
     CollapsibleManager.init();
+    ReportGenerator.init();
     TimeDisplay.init();
     
     // Set up verify button handler
