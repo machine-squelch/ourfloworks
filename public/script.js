@@ -314,16 +314,32 @@ const CommissionVerifier = {
 
             ProgressManager.update(30, 'Uploading and processing Excel data...');
 
+            // Add timeout and progress simulation for long processing
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout
+
+            // Simulate progress during long processing
+            let progressPercent = 30;
+            const progressInterval = setInterval(() => {
+                if (progressPercent < 65) {
+                    progressPercent += 5;
+                    ProgressManager.update(progressPercent, 'Processing Excel file... This may take up to 2 minutes for large files.');
+                }
+            }, 5000); // Update every 5 seconds
+
             const response = await fetch('/verify-commission', {
                 method: 'POST',
-                body: formData
+                body: formData,
+                signal: controller.signal
             });
 
+            clearTimeout(timeoutId);
+            clearInterval(progressInterval);
             ProgressManager.update(70, 'Processing commission calculations...');
 
             if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || 'Verification failed');
+                const errorData = await response.json().catch(() => ({ error: 'Server error' }));
+                throw new Error(errorData.error || `Server returned ${response.status}: ${response.statusText}`);
             }
 
             const results = await response.json();
@@ -338,7 +354,17 @@ const CommissionVerifier = {
         } catch (error) {
             console.error('Verification error:', error);
             ProgressManager.hide();
-            FileUploadManager.showError(error.message || 'Failed to verify commission data');
+            
+            let errorMessage = 'Failed to verify commission data';
+            if (error.name === 'AbortError') {
+                errorMessage = 'Processing timeout - file may be too large or complex. Please try with a smaller file.';
+            } else if (error.message.includes('Failed to fetch')) {
+                errorMessage = 'Network error - please check your connection and try again.';
+            } else {
+                errorMessage = error.message || errorMessage;
+            }
+            
+            FileUploadManager.showError(errorMessage);
         } finally {
             AppState.isProcessing = false;
             this.updateVerifyButton(false);

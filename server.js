@@ -362,16 +362,18 @@ app.post('/verify-commission', upload.single('excelFile'), async (req, res) => {
         }
 
         filePath = req.file.path;
-        console.log(`Processing file: ${req.file.originalname} (${req.file.size} bytes)`);
+        console.log(`[${new Date().toISOString()}] Processing file: ${req.file.originalname} (${req.file.size} bytes)`);
 
         // Read Excel file with error handling
         let workbook;
         try {
+            console.log(`[${new Date().toISOString()}] Reading Excel file...`);
             workbook = XLSX.readFile(filePath, { 
                 cellDates: true,
                 cellNF: false,
                 cellText: false
             });
+            console.log(`[${new Date().toISOString()}] Excel file read successfully`);
         } catch (readError) {
             console.error('Error reading Excel file:', readError);
             return res.status(400).json({
@@ -402,21 +404,27 @@ app.post('/verify-commission', upload.single('excelFile'), async (req, res) => {
         console.log(`Using sheets: ${detailSheetName}, ${summarySheetName}`);
 
         // Convert sheets to JSON
+        console.log(`[${new Date().toISOString()}] Converting sheets to JSON...`);
         const detailSheet = workbook.Sheets[detailSheetName];
         const summarySheet = workbook.Sheets[summarySheetName];
 
         const detailData = XLSX.utils.sheet_to_json(detailSheet);
         const summaryData = XLSX.utils.sheet_to_json(summarySheet);
 
-        console.log(`DETAIL sheet: ${detailData.length} rows`);
-        console.log(`SUMMARY sheet: ${summaryData.length} rows`);
+        console.log(`[${new Date().toISOString()}] DETAIL sheet: ${detailData.length} rows`);
+        console.log(`[${new Date().toISOString()}] SUMMARY sheet: ${summaryData.length} rows`);
 
         // Initialize verifier and process data
+        console.log(`[${new Date().toISOString()}] Starting commission verification...`);
         const verifier = new CommissionVerifier();
         const calculatedResults = verifier.processDetailSheet(detailData);
+        console.log(`[${new Date().toISOString()}] Detail sheet processing complete`);
+        
         const summaryResults = verifier.processSummarySheet(summaryData);
+        console.log(`[${new Date().toISOString()}] Summary sheet processing complete`);
 
         // Build response
+        console.log(`[${new Date().toISOString()}] Building response...`);
         const response = {
             summary: {
                 my_calculated_total: (calculatedResults.totalCalculatedCommission + calculatedResults.totalStateBonuses).toFixed(2),
@@ -466,6 +474,7 @@ app.post('/verify-commission', upload.single('excelFile'), async (req, res) => {
         };
 
         console.log('Sending response with', response.summary.total_discrepancies, 'discrepancies');
+        console.log(`[${new Date().toISOString()}] Response ready, sending to client...`);
         res.json(response);
 
     } catch (error) {
