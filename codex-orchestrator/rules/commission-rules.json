@@ -1,0 +1,33 @@
+{
+  "commissionRules": {
+    "calculationLogic": {
+      "inputs": {
+        "lineSubtotal": "number",
+        "stateMonthlySales": "number",
+        "purchaseType": "\"new\" or \"repeat\"",
+        "isIncentivized": "boolean",
+        "incentiveRateOverride": "number|null"
+      },
+      "baseRates": [
+        { "threshold": "0-9999",     "repeat": 0.02,  "new": 0.03  },
+        { "threshold": "10000-49999","repeat": 0.01,  "new": 0.02  },
+        { "threshold": "50000+",     "repeat": 0.005, "new": 0.015 }
+      ],
+      "incentivizedSkus": {
+        "override": true,
+        "defaultRate": 0.03
+      },
+      "stateVolumeBonuses": [
+        { "range": "10000-49999", "bonus": 100 },
+        { "range": "50000+",      "bonus": 300 }
+      ],
+      "calculationOrder": [
+        "1) Use provided purchaseType directly ('new' or 'repeat').",
+        "2) If isIncentivized: rate = incentiveRateOverride ?? defaultRate.",
+        "3) Else pick base rate using stateMonthlySales and purchaseType.",
+        "4) Line commission = lineSubtotal * rate.",
+        "5) After summing all lines per state per month, apply flat stateVolumeBonus."
+      ]
+    }
+  }
+}
