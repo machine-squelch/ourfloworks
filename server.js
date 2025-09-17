@@ -313,23 +313,161 @@ class CommissionVerifier {
     // Process SUMMARY sheet with error handling
     processSummarySheet(summaryData) {
         try {
-            let actualPayment = 0;
-            
+            let actualPayment = null;
+
             console.log('Processing summary sheet with', summaryData.length, 'rows');
-            
-            // Look for payment information in summary
-            summaryData.forEach((row, index) => {
+
+            const normalizeName = (value) => {
+                if (value === null || value === undefined) return '';
+                return value
+                    .toString()
+                    .toLowerCase()
+                    .replace(/[^a-z0-9]+/g, ' ')
+                    .trim()
+                    .replace(/\s+/g, ' ');
+            };
+
+            const parseNumericValue = (value) => {
+                if (typeof value === 'number' && !Number.isNaN(value)) {
+                    return value;
+                }
+                if (typeof value === 'string') {
+                    const trimmed = value.trim();
+                    if (!trimmed) return NaN;
+                    const isNegative = /^\(.*\)$/.test(trimmed);
+                    const cleaned = trimmed.replace(/[^0-9.-]+/g, '');
+                    if (!cleaned) return NaN;
+                    const numeric = parseFloat(cleaned);
+                    if (Number.isNaN(numeric)) return NaN;
+                    return isNegative ? -numeric : numeric;
+                }
+                return NaN;
+            };
+
+            const paymentTerms = [
+                'total commission paid',
+                'total commissions paid',
+                'total commission payout',
+                'total commission payment',
+                'commission payout',
+                'commission paid',
+                'commission payment',
+                'commission payment amount',
+                'rep payment',
+                'rep payments',
+                'rep payout',
+                'rep payout amount',
+                'rep commission paid',
+                'rep commission payout',
+                'total rep payment',
+                'total rep payout',
+                'actual payment',
+                'actual payout',
+                'actual commission paid',
+                'total payment to rep',
+                'total amount paid',
+                'total paid to rep',
+                'amount paid to rep',
+                'net payment',
+                'net payout',
+                'commission check amount',
+                'payment amount to rep',
+                'rep pay',
+                'rep total payment'
+            ];
+
+            const keywordPatterns = [
+                ['commission', 'paid'],
+                ['commission', 'payment'],
+                ['commission', 'payout'],
+                ['commission', 'pay'],
+                ['rep', 'payment'],
+                ['rep', 'payout'],
+                ['rep', 'paid'],
+                ['rep', 'pay'],
+                ['actual', 'payment'],
+                ['actual', 'payout'],
+                ['net', 'payment'],
+                ['total', 'rep', 'payment'],
+                ['total', 'commission', 'paid']
+            ];
+
+            const normalizedTermSet = new Set(paymentTerms.map(normalizeName));
+
+            const matchesPaymentTerm = (text) => {
+                const normalized = normalizeName(text);
+                if (!normalized) return false;
+                if (normalizedTermSet.has(normalized)) return true;
+                return keywordPatterns.some(pattern => pattern.every(keyword => normalized.includes(keyword)));
+            };
+
+            const findNumericCompanion = (row, labelKey) => {
+                const keys = Object.keys(row);
+                const startIndex = keys.indexOf(labelKey);
+                const orderedKeys = startIndex >= 0
+                    ? [...keys.slice(startIndex + 1), ...keys.slice(0, startIndex)]
+                    : keys;
+
+                for (const key of orderedKeys) {
+                    if (key === labelKey) continue;
+                    const numericValue = parseNumericValue(row[key]);
+                    if (!Number.isNaN(numericValue)) {
+                        return numericValue;
+                    }
+                }
+
+                return NaN;
+            };
+
+            for (let index = 0; index < summaryData.length && actualPayment === null; index++) {
+                const row = summaryData[index] || {};
+
                 if (index < 3) {
                     console.log(`Summary row ${index + 1}:`, Object.keys(row));
                 }
-                
-                Object.keys(row).forEach(key => {
-                    const value = parseFloat(row[key]);
-                    if (!isNaN(value) && value > 0) {
-                        actualPayment = Math.max(actualPayment, value);
+
+                const keys = Object.keys(row);
+
+                for (const key of keys) {
+                    if (!matchesPaymentTerm(key)) continue;
+                    const numericValue = parseNumericValue(row[key]);
+                    if (!Number.isNaN(numericValue)) {
+                        actualPayment = numericValue;
+                        console.log(`Identified payment using header "${key}" with value`, numericValue);
+                        break;
                     }
-                });
-            });
+                }
+
+                if (actualPayment !== null) {
+                    break;
+                }
+
+                for (const key of keys) {
+                    const cellValue = row[key];
+                    if (typeof cellValue !== 'string' && !(cellValue instanceof String)) continue;
+
+                    if (!matchesPaymentTerm(cellValue)) continue;
+
+                    const selfNumeric = parseNumericValue(cellValue);
+                    if (!Number.isNaN(selfNumeric)) {
+                        actualPayment = selfNumeric;
+                        console.log(`Identified payment within label "${cellValue}" with value`, selfNumeric);
+                        break;
+                    }
+
+                    const companionValue = findNumericCompanion(row, key);
+                    if (!Number.isNaN(companionValue)) {
+                        actualPayment = companionValue;
+                        console.log(`Identified payment next to label "${cellValue}" with value`, companionValue);
+                        break;
+                    }
+                }
+            }
+
+            if (actualPayment === null) {
+                console.warn('Unable to locate actual payment in summary sheet; defaulting to 0.');
+                actualPayment = 0;
+            }
 
             console.log('Actual payment found:', actualPayment);
             return { actualPayment };
