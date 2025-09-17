@@ -2,10 +2,11 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const XLSX = require('xlsx');
 
 const app = express();
-const PORT = process.env.PORT || 8080;
+const PORT = parseInt(process.env.PORT, 10) || 8080;
 
 // Configure trust proxy for DigitalOcean (fixes rate limiting issue)
 app.set('trust proxy', 1);
@@ -14,13 +15,40 @@ app.set('trust proxy', 1);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Serve static files
-app.use(express.static('public'));
+// Serve static files using absolute path to ensure compatibility with managed runtimes
+const publicDir = path.join(__dirname, 'public');
+app.use(express.static(publicDir));
 
-// Create uploads directory (use /tmp in production)
-const uploadsDir = process.env.NODE_ENV === 'production' ? '/tmp/uploads' : './uploads';
-if (!fs.existsSync(uploadsDir)) {
+// Determine upload directory with runtime override support
+const defaultUploadDir = process.env.NODE_ENV === 'production'
+    ? path.join(os.tmpdir(), 'uploads')
+    : path.join(__dirname, 'uploads');
+const configuredUploadDir = process.env.UPLOADS_DIR
+    ? path.resolve(process.env.UPLOADS_DIR)
+    : defaultUploadDir;
+
+let uploadsDir = configuredUploadDir;
+
+// Ensure the upload directory exists with graceful fallback handling
+try {
     fs.mkdirSync(uploadsDir, { recursive: true });
+} catch (error) {
+    console.error(`Failed to create upload directory at ${uploadsDir}:`, error);
+
+    const fallbackDir = path.join(os.tmpdir(), 'ourfloworks-uploads');
+
+    if (uploadsDir !== fallbackDir) {
+        try {
+            fs.mkdirSync(fallbackDir, { recursive: true });
+            uploadsDir = fallbackDir;
+            console.warn(`Using fallback upload directory at ${uploadsDir}`);
+        } catch (fallbackError) {
+            console.error('Unable to create fallback upload directory:', fallbackError);
+            throw fallbackError;
+        }
+    } else {
+        throw error;
+    }
 }
 
 // Configure multer for file uploads
