@@ -12,7 +12,9 @@ if (!targetFile) {
   process.exit(1);
 }
 
-const rulesPath = path.resolve("./rules/commission-rules.json");
+const rulesPath = path.resolve(
+  new URL("../rules/commission-rules.json", import.meta.url).pathname,
+);
 const code = fs.readFileSync(targetFile, "utf-8");
 
 console.log("🔍 Analyzing...");
