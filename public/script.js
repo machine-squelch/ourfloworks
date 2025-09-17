@@ -657,6 +657,19 @@ const ReportGenerator = {
     margin: 48,
     lineHeight: 14,
     maxDiscrepancyEntries: 15,
+    logoPath: '/dllogoonly.png',
+    logoPromise: null,
+    logoDataUrl: null,
+    logoWidth: 0,
+    logoHeight: 0,
+    theme: {
+        primary: [16, 55, 114],
+        secondary: [56, 136, 216],
+        accent: [236, 244, 255],
+        text: [45, 45, 45],
+        muted: [110, 120, 140],
+        error: [220, 53, 69]
+    },
 
     init() {
         this.button = document.getElementById('download-btn');
@@ -720,16 +733,64 @@ const ReportGenerator = {
         const margin = this.margin;
         const pageWidth = doc.internal.pageSize.getWidth();
         const contentWidth = pageWidth - margin * 2;
-        let y = margin;
+        const { primary, secondary, accent, text } = this.theme;
 
+        let branding = null;
+        try {
+            branding = await this.loadLogo();
+        } catch (logoError) {
+            console.warn('Report logo unavailable:', logoError);
+        }
+
+        const headerHeight = 110;
+        doc.setFillColor(primary[0], primary[1], primary[2]);
+        doc.rect(0, 0, pageWidth, headerHeight, 'F');
+
+        doc.setFillColor(secondary[0], secondary[1], secondary[2]);
+        doc.rect(0, headerHeight - 18, pageWidth, 18, 'F');
+
+        if (branding?.dataUrl) {
+            const ratio = branding.width && branding.height ? branding.height / branding.width : null;
+            const maxWidth = 132;
+            const maxHeight = headerHeight - 36;
+            let logoWidth = Math.min(maxWidth, branding.width ? branding.width * 0.4 : maxWidth);
+            if (!Number.isFinite(logoWidth) || logoWidth <= 0) {
+                logoWidth = maxWidth;
+            }
+            let logoHeight = ratio && Number.isFinite(ratio) && ratio > 0 ? logoWidth * ratio : maxHeight * 0.6;
+            if (!Number.isFinite(logoHeight) || logoHeight <= 0) {
+                logoHeight = maxHeight * 0.6;
+            }
+            if (logoHeight > maxHeight && ratio && Number.isFinite(ratio) && ratio > 0) {
+                logoHeight = maxHeight;
+                logoWidth = Math.min(maxWidth, logoHeight / ratio);
+            }
+
+            const logoX = Math.max(margin, pageWidth - margin - logoWidth);
+            const logoY = Math.max(16, (headerHeight - logoHeight) / 2);
+
+            try {
+                doc.addImage(branding.dataUrl, 'PNG', logoX, logoY, logoWidth, logoHeight, undefined, 'FAST');
+            } catch (imageError) {
+                console.warn('Unable to embed report logo:', imageError);
+            }
+        }
+
+        doc.setTextColor(255, 255, 255);
         doc.setFont('helvetica', 'bold');
-        doc.setFontSize(28);
-        doc.setTextColor(0, 0, 0);
-        doc.text('Commission Verification Report', margin, y);
-        y += this.lineHeight * 2;
+        doc.setFontSize(26);
+        doc.text('Commission Verification Report', margin, headerHeight / 2 - 6);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(13);
+        doc.text('Comprehensive commission audit summary', margin, headerHeight / 2 + 18);
 
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(12);
+        doc.setTextColor(text[0], text[1], text[2]);
+        doc.setDrawColor(200, 200, 200);
+        doc.setLineWidth(0.5);
+
+        let y = headerHeight + 28;
 
         const headerLines = [
             `Generated: ${new Date().toLocaleString()}`,
@@ -737,20 +798,34 @@ const ReportGenerator = {
             `Discrepancies Identified: ${(Array.isArray(results.discrepancies) ? results.discrepancies.length : 0).toLocaleString('en-US')}`
         ].filter(Boolean);
 
-        headerLines.forEach(line => {
-            const wrapped = this.wrapText(doc, line, contentWidth);
-            const requiredHeight = Math.max(this.lineHeight, wrapped.length * this.lineHeight);
-            y = this.ensureSpace(doc, y, margin, requiredHeight);
-            wrapped.forEach(wrappedLine => {
-                doc.text(wrappedLine, margin, y);
-                y += this.lineHeight;
+        if (headerLines.length) {
+            const headerWrapped = [];
+            headerLines.forEach(line => {
+                const wrapped = this.wrapText(doc, line, contentWidth);
+                headerWrapped.push(...wrapped);
             });
-        });
 
-        y += 4;
-        doc.setDrawColor(200, 200, 200);
-        doc.line(margin, y, pageWidth - margin, y);
-        y += 20;
+            const infoPadding = 12;
+            const infoHeight = headerWrapped.length * this.lineHeight + infoPadding * 2;
+
+            y = this.ensureSpace(doc, y, margin, infoHeight);
+
+            const infoTop = y;
+            doc.setFillColor(accent[0], accent[1], accent[2]);
+            doc.setDrawColor(secondary[0], secondary[1], secondary[2]);
+            doc.roundedRect(margin - 8, infoTop, contentWidth + 16, infoHeight, 10, 10, 'FD');
+
+            let infoY = infoTop + infoPadding + this.lineHeight - 2;
+            doc.setTextColor(primary[0], primary[1], primary[2]);
+            headerWrapped.forEach(line => {
+                doc.text(line, margin, infoY);
+                infoY += this.lineHeight;
+            });
+
+            doc.setDrawColor(200, 200, 200);
+            doc.setTextColor(text[0], text[1], text[2]);
+            y = infoTop + infoHeight + 20;
+        }
 
         y = this.addSummary(doc, results, margin, contentWidth, y);
         y = this.addStateHighlights(doc, results, margin, contentWidth, y);
@@ -794,6 +869,63 @@ const ReportGenerator = {
         }
     },
 
+    async loadLogo() {
+        if (this.logoDataUrl && this.logoWidth && this.logoHeight) {
+            return {
+                dataUrl: this.logoDataUrl,
+                width: this.logoWidth,
+                height: this.logoHeight
+            };
+        }
+
+        if (!this.logoPromise) {
+            this.logoPromise = new Promise((resolve, reject) => {
+                const img = new Image();
+                img.decoding = 'async';
+                img.crossOrigin = 'anonymous';
+
+                img.onload = () => {
+                    try {
+                        const width = img.naturalWidth || img.width;
+                        const height = img.naturalHeight || img.height;
+
+                        if (!width || !height) {
+                            throw new Error('Logo dimensions unavailable');
+                        }
+
+                        const canvas = document.createElement('canvas');
+                        canvas.width = width;
+                        canvas.height = height;
+                        const context = canvas.getContext('2d');
+                        context.drawImage(img, 0, 0);
+                        const dataUrl = canvas.toDataURL('image/png');
+
+                        this.logoDataUrl = dataUrl;
+                        this.logoWidth = width;
+                        this.logoHeight = height;
+
+                        resolve({ dataUrl, width, height });
+                    } catch (error) {
+                        reject(error);
+                    }
+                };
+
+                img.onerror = () => reject(new Error('Logo image failed to load'));
+
+                try {
+                    img.src = new URL(this.logoPath, window.location.href).href;
+                } catch (error) {
+                    reject(error);
+                }
+            }).catch(error => {
+                this.logoPromise = null;
+                throw error;
+            });
+        }
+
+        return this.logoPromise;
+    },
+
     addSummary(doc, results, margin, width, y) {
         y = this.addSectionTitle(doc, 'Summary', margin, y);
 
@@ -822,29 +954,40 @@ const ReportGenerator = {
 
         const labelWidth = Math.min(240, width * 0.45);
         const valueWidth = Math.max(120, width - labelWidth);
+        const { primary, secondary, accent, text, error } = this.theme;
 
         summaryItems.forEach(item => {
             const valueText = String(item.value ?? '');
             const wrappedValue = this.wrapText(doc, valueText, valueWidth);
-            const requiredHeight = Math.max(this.lineHeight + 4, wrappedValue.length * this.lineHeight + 4);
-            y = this.ensureSpace(doc, y, margin, requiredHeight);
+            const blockHeight = Math.max(this.lineHeight + 10, wrappedValue.length * this.lineHeight + 10);
+            y = this.ensureSpace(doc, y, margin, blockHeight);
 
-            doc.setTextColor(0, 0, 0);
+            const baseline = y;
+            const blockTop = baseline - this.lineHeight + 4;
+
+            doc.setFillColor(accent[0], accent[1], accent[2]);
+            doc.setDrawColor(secondary[0], secondary[1], secondary[2]);
+            doc.roundedRect(margin - 8, blockTop, width + 16, blockHeight, 8, 8, 'FD');
+
             doc.setFont('helvetica', 'bold');
-            doc.text(item.label, margin, y);
+            doc.setTextColor(primary[0], primary[1], primary[2]);
+            doc.text(item.label, margin, baseline);
 
-            const color = item.color === 'error' ? [220, 53, 69] : [0, 0, 0];
+            const valuePalette = item.color === 'error' ? error : text;
             doc.setFont('helvetica', 'normal');
-            doc.setTextColor(...color);
+            doc.setTextColor(valuePalette[0], valuePalette[1], valuePalette[2]);
             wrappedValue.forEach((line, index) => {
-                doc.text(line, margin + labelWidth, y + (index * this.lineHeight));
+                doc.text(line, margin + labelWidth, baseline + (index * this.lineHeight));
             });
 
-            y += wrappedValue.length * this.lineHeight + 8;
+            const blockBottom = blockTop + blockHeight;
+            y = blockBottom + 8;
+            doc.setTextColor(text[0], text[1], text[2]);
         });
 
-        doc.setTextColor(0, 0, 0);
+        doc.setDrawColor(200, 200, 200);
         doc.setFont('helvetica', 'normal');
+        doc.setTextColor(text[0], text[1], text[2]);
         return y;
     },
 
@@ -867,13 +1010,17 @@ const ReportGenerator = {
             return y;
         }
 
+        const { primary, secondary, accent, text, muted, error } = this.theme;
+
         y = this.addSectionTitle(doc, 'State Highlights', margin, y);
         doc.setFont('helvetica', 'italic');
-        doc.setTextColor(100, 100, 100);
+        doc.setTextColor(muted[0], muted[1], muted[2]);
         doc.text('Top states ranked by commission variance', margin, y);
-        y += this.lineHeight + 4;
+        y += this.lineHeight + 6;
         doc.setFont('helvetica', 'normal');
-        doc.setTextColor(0, 0, 0);
+        doc.setTextColor(text[0], text[1], text[2]);
+
+        const blockPadding = 10;
 
         topStates.forEach(entry => {
             const state = entry.data;
@@ -891,53 +1038,84 @@ const ReportGenerator = {
                 item.lines = this.wrapText(doc, item.text, width);
             });
 
-            const requiredHeight = headerLines.length * this.lineHeight +
-                detailEntries.reduce((sum, item) => sum + item.lines.length * this.lineHeight, 0) + 16;
+            const headerHeight = headerLines.length * this.lineHeight;
+            const detailsHeight = detailEntries.reduce((sum, item) => sum + item.lines.length * this.lineHeight, 0);
+            const blockHeight = headerHeight + detailsHeight + blockPadding * 2;
 
-            y = this.ensureSpace(doc, y, margin, requiredHeight);
+            y = this.ensureSpace(doc, y, margin, blockHeight);
+
+            const blockTop = y;
+            doc.setFillColor(accent[0], accent[1], accent[2]);
+            doc.setDrawColor(secondary[0], secondary[1], secondary[2]);
+            doc.roundedRect(margin - 8, blockTop, width + 16, blockHeight, 8, 8, 'FD');
+            doc.setFillColor(secondary[0], secondary[1], secondary[2]);
+            doc.rect(margin - 8, blockTop, 6, blockHeight, 'F');
 
             doc.setFont('helvetica', 'bold');
+            doc.setTextColor(primary[0], primary[1], primary[2]);
+            let lineY = blockTop + blockPadding + this.lineHeight;
             headerLines.forEach((line, index) => {
-                doc.text(line, margin, y + (index * this.lineHeight));
+                doc.text(line, margin, lineY + (index * this.lineHeight));
             });
 
-            let blockBottom = y + headerLines.length * this.lineHeight;
+            let contentY = lineY + headerHeight - this.lineHeight;
             doc.setFont('helvetica', 'normal');
 
             detailEntries.forEach(item => {
+                const palette = item.color === 'error' ? error : text;
                 item.lines.forEach(line => {
-                    blockBottom += this.lineHeight;
-                    if (item.color === 'error') {
-                        doc.setTextColor(220, 53, 69);
-                    } else {
-                        doc.setTextColor(0, 0, 0);
-                    }
-                    doc.text(line, margin, blockBottom);
+                    contentY += this.lineHeight;
+                    doc.setTextColor(palette[0], palette[1], palette[2]);
+                    doc.text(line, margin, contentY);
                 });
             });
 
-            doc.setTextColor(0, 0, 0);
-            y = blockBottom + 12;
+            doc.setTextColor(text[0], text[1], text[2]);
+            y = blockTop + blockHeight + 14;
         });
 
+        doc.setDrawColor(200, 200, 200);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(text[0], text[1], text[2]);
         return y;
     },
 
     addDiscrepancies(doc, results, margin, width, y) {
         const discrepancies = Array.isArray(results.discrepancies) ? results.discrepancies : [];
+        const { primary, secondary, accent, text, muted, error } = this.theme;
 
         y = this.addSectionTitle(doc, 'Detailed Discrepancies', margin, y);
         doc.setFont('helvetica', 'italic');
-        doc.setTextColor(100, 100, 100);
+        doc.setTextColor(muted[0], muted[1], muted[2]);
         doc.text('Each variance references the original Excel cell for rapid manager review.', margin, y);
-        y += this.lineHeight + 4;
+        y += this.lineHeight + 6;
         doc.setFont('helvetica', 'normal');
-        doc.setTextColor(0, 0, 0);
+        doc.setTextColor(text[0], text[1], text[2]);
+
+        const blockPadding = 10;
 
         if (!discrepancies.length) {
-            y = this.ensureSpace(doc, y, margin, this.lineHeight);
-            doc.text('No discrepancies were detected — reported and calculated totals align.', margin, y);
-            return y + this.lineHeight;
+            const message = 'No discrepancies were detected — reported and calculated totals align.';
+            const messageLines = this.wrapText(doc, message, width);
+            const blockHeight = messageLines.length * this.lineHeight + blockPadding * 2;
+
+            y = this.ensureSpace(doc, y, margin, blockHeight);
+
+            const blockTop = y;
+            doc.setFillColor(accent[0], accent[1], accent[2]);
+            doc.setDrawColor(secondary[0], secondary[1], secondary[2]);
+            doc.roundedRect(margin - 8, blockTop, width + 16, blockHeight, 8, 8, 'FD');
+
+            let lineY = blockTop + blockPadding + this.lineHeight - 2;
+            doc.setTextColor(primary[0], primary[1], primary[2]);
+            messageLines.forEach(line => {
+                doc.text(line, margin, lineY);
+                lineY += this.lineHeight;
+            });
+
+            doc.setDrawColor(200, 200, 200);
+            doc.setTextColor(text[0], text[1], text[2]);
+            return blockTop + blockHeight + 8;
         }
 
         discrepancies.slice(0, this.maxDiscrepancyEntries).forEach((discrepancy, index) => {
@@ -957,33 +1135,40 @@ const ReportGenerator = {
                 item.lines = this.wrapText(doc, item.text, width);
             });
 
-            const requiredHeight = headerLines.length * this.lineHeight +
-                detailEntries.reduce((sum, item) => sum + item.lines.length * this.lineHeight, 0) + 24;
+            const headerHeight = headerLines.length * this.lineHeight;
+            const detailsHeight = detailEntries.reduce((sum, item) => sum + item.lines.length * this.lineHeight, 0);
+            const blockHeight = headerHeight + detailsHeight + blockPadding * 2;
 
-            y = this.ensureSpace(doc, y, margin, requiredHeight);
+            y = this.ensureSpace(doc, y, margin, blockHeight);
+
+            const blockTop = y;
+            doc.setFillColor(accent[0], accent[1], accent[2]);
+            doc.setDrawColor(secondary[0], secondary[1], secondary[2]);
+            doc.roundedRect(margin - 8, blockTop, width + 16, blockHeight, 8, 8, 'FD');
+            doc.setFillColor(secondary[0], secondary[1], secondary[2]);
+            doc.rect(margin - 8, blockTop, 6, blockHeight, 'F');
 
             doc.setFont('helvetica', 'bold');
+            doc.setTextColor(primary[0], primary[1], primary[2]);
+            let lineY = blockTop + blockPadding + this.lineHeight;
             headerLines.forEach((line, lineIndex) => {
-                doc.text(line, margin, y + (lineIndex * this.lineHeight));
+                doc.text(line, margin, lineY + (lineIndex * this.lineHeight));
             });
 
-            let blockBottom = y + headerLines.length * this.lineHeight;
+            let contentY = lineY + headerHeight - this.lineHeight;
             doc.setFont('helvetica', 'normal');
 
             detailEntries.forEach(item => {
+                const palette = item.color === 'error' ? error : text;
                 item.lines.forEach(line => {
-                    blockBottom += this.lineHeight;
-                    if (item.color === 'error') {
-                        doc.setTextColor(220, 53, 69);
-                    } else {
-                        doc.setTextColor(0, 0, 0);
-                    }
-                    doc.text(line, margin, blockBottom);
+                    contentY += this.lineHeight;
+                    doc.setTextColor(palette[0], palette[1], palette[2]);
+                    doc.text(line, margin, contentY);
                 });
             });
 
-            doc.setTextColor(0, 0, 0);
-            y = blockBottom + 16;
+            doc.setTextColor(text[0], text[1], text[2]);
+            y = blockTop + blockHeight + 18;
         });
 
         if (discrepancies.length > this.maxDiscrepancyEntries) {
@@ -993,28 +1178,45 @@ const ReportGenerator = {
             const requiredHeight = noticeLines.length * this.lineHeight + 6;
             y = this.ensureSpace(doc, y, margin, requiredHeight);
             doc.setFont('helvetica', 'italic');
-            doc.setTextColor(100, 100, 100);
+            doc.setTextColor(muted[0], muted[1], muted[2]);
             noticeLines.forEach((line, idx) => {
                 doc.text(line, margin, y + (idx * this.lineHeight));
             });
             doc.setFont('helvetica', 'normal');
-            doc.setTextColor(0, 0, 0);
+            doc.setTextColor(text[0], text[1], text[2]);
             y += noticeLines.length * this.lineHeight + 4;
         }
 
+        doc.setDrawColor(200, 200, 200);
+        doc.setTextColor(text[0], text[1], text[2]);
         return y;
     },
 
     addSectionTitle(doc, title, margin, y) {
-        y = this.ensureSpace(doc, y, margin, this.lineHeight * 2);
+        const { primary, secondary, accent, text } = this.theme;
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const contentWidth = pageWidth - margin * 2;
+        const blockHeight = this.lineHeight + 14;
+
+        y = this.ensureSpace(doc, y, margin, blockHeight + 6);
+
+        const blockTop = y;
+        doc.setFillColor(accent[0], accent[1], accent[2]);
+        doc.setDrawColor(secondary[0], secondary[1], secondary[2]);
+        doc.roundedRect(margin - 8, blockTop, contentWidth + 16, blockHeight, 8, 8, 'FD');
+
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(16);
-        doc.setTextColor(0, 0, 0);
-        doc.text(title, margin, y);
-        y += this.lineHeight + 4;
+        doc.setTextColor(primary[0], primary[1], primary[2]);
+        const textBaseline = blockTop + blockHeight - 8;
+        doc.text(title, margin, textBaseline);
+
+        const nextY = blockTop + blockHeight + 6;
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(12);
-        return y;
+        doc.setTextColor(text[0], text[1], text[2]);
+        doc.setDrawColor(200, 200, 200);
+        return nextY;
     },
 
     ensureSpace(doc, y, margin, required = 0) {
