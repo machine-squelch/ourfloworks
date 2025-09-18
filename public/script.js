@@ -447,7 +447,7 @@ const ResultsManager = {
                 <td title="${transactions} transactions • ${Utils.formatCurrency(totalSales)} in sales">${state.state || 'N/A'}</td>
                 <td>${previousDisplay}</td>
                 <td>${correctedDisplay}</td>
-                <td class="${differenceClass}">${differenceDisplay}</td>
+                <td class="difference ${differenceClass}">${differenceDisplay}</td>
             `;
             tableBody.appendChild(row);
         });
@@ -542,7 +542,7 @@ const ResultsManager = {
                     <td>${entry?.state || 'N/A'}</td>
                     <td>${previous != null && Number.isFinite(previous) ? Utils.formatCurrency(previous) : '—'}</td>
                     <td>${Utils.formatCurrency(corrected)}</td>
-                    <td class="${differenceClass}">${Utils.formatCurrency(difference)}</td>
+                    <td class="difference ${differenceClass}">${Utils.formatCurrency(difference)}</td>
                     <td>${statusText}</td>
                 `;
                 tableBody.appendChild(row);
