@@ -14,7 +14,7 @@ A professional, security-enhanced web application for verifying commission calcu
 - **Copyright Protection**: Comprehensive intellectual property protection
 
 ## Features
-- **CSV File Upload**: Drag & drop or browse to upload commission data
+- **Excel File Upload**: Drag & drop or browse to upload commission data
 - **Real-time Verification**: Instant validation against official commission structure
 - **State Analysis**: Breakdown by state with tier classification and bonuses
 - **Discrepancy Detection**: Identifies calculation errors with detailed reporting
@@ -68,24 +68,23 @@ commission-webapp/
 │   ├── script.js          # Frontend JavaScript
 │   ├── style.css          # Cyber-themed styling
 │   └── dllogoonly.png     # DL Wholesale logo
-├── uploads/               # Temporary CSV upload directory
+├── uploads/               # Temporary Excel upload directory
 └── README.md             # This file
 ```
 
 ## API Endpoints
 - `GET /` - Main web interface
-- `POST /verify-commission` - Upload and verify CSV file
+- `POST /verify-commission` - Upload and verify Excel workbook
 - `POST /download-report` - Generate verification report
 
 ## Usage Instructions
-1. Export DETAIL tab from Google Sheets as CSV
-2. Upload CSV file to the web app
-3. Review verification results
-4. Download detailed report if needed
+1. Upload xls or xlsx file to the web app
+2. Review verification results
+3. Download detailed report if needed
 
-## Security Features
-- File type validation (CSV only)
-- File size limits (10MB max)
+## Additional Security Controls
+- File type validation
+- File size limits (50MB max)
 - Temporary file cleanup
 - Input sanitization
 - CORS protection
@@ -98,8 +97,8 @@ commission-webapp/
 
 ## Technical Stack
 - **Backend**: Node.js + Express
-- **Frontend**: Vanilla JavaScript + Tailwind CSS
-- **File Processing**: Multer + CSV Parser
+- **Frontend**: Vanilla JavaScript + Custom CSS
+- **File Processing**: Multer + XLSX Parser
 - **Styling**: Custom cyber theme with animations
 - **Deployment**: Digital Ocean App Platform
 
