@@ -5,6 +5,22 @@ const AppState = {
     results: null
 };
 
+// Shared discrepancy analysis
+const countStateDiscrepancies = (comparison) => {
+    const entries = Array.isArray(comparison) ? comparison : [];
+    return entries.reduce((count, entry) => {
+        const corrected = Number(entry?.ourTotalWithBonus) || 0;
+        if (!entry?.summaryFound) {
+            return corrected !== 0 ? count + 1 : count;
+        }
+
+        const previous = Number(entry.summaryTotal) || 0;
+        const delta = Number(entry.delta);
+        const difference = Number.isFinite(delta) ? delta : corrected - previous;
+        return Math.abs(difference) > 0.01 ? count + 1 : count;
+    }, 0);
+};
+
 // Utility Functions
 const Utils = {
     formatFileSize(bytes) {
@@ -290,14 +306,7 @@ const ResultsManager = {
         const correctedTotal = Number(grandTotals?.totalWithBonus) || 0;
         const moneyOwed = correctedTotal - previouslyCalculated;
 
-        const impactedStates = summaryEntries.reduce((count, entry) => {
-            if (!entry?.summaryFound) return count;
-            const delta = Number(entry.delta);
-            if (Number.isFinite(delta) && Math.abs(delta) > 0.01) {
-                return count + 1;
-            }
-            return count;
-        }, 0);
+        const impactedStates = countStateDiscrepancies(summaryEntries);
 
         const cardConfigurations = [
             {
@@ -1063,18 +1072,7 @@ const ReportGenerator = {
     },
 
     countDiscrepancies(comparison) {
-        const entries = Array.isArray(comparison) ? comparison : [];
-        return entries.reduce((count, entry) => {
-            const corrected = Number(entry?.ourTotalWithBonus) || 0;
-            if (!entry?.summaryFound) {
-                return corrected !== 0 ? count + 1 : count;
-            }
-
-            const previous = Number(entry.summaryTotal) || 0;
-            const delta = Number(entry.delta);
-            const difference = Number.isFinite(delta) ? delta : corrected - previous;
-            return Math.abs(difference) > 0.01 ? count + 1 : count;
-        }, 0);
+        return countStateDiscrepancies(comparison);
     },
 
     addSummary(doc, entry, margin, width, y) {
