@@ -2,186 +2,508 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Thinkazoo Commission Verification Web App</title>
-    <meta name="description" content="Secure Thinkazoo console for verifying commission workbooks with instant discrepancy detection.">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Thinkazoo Commission Verifier</title>
+    
+    <!-- Security Meta Tags -->
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+    <meta http-equiv="X-Frame-Options" content="DENY">
+    <meta http-equiv="X-XSS-Protection" content="1; mode=block">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    
+    <!-- Application Meta Tags -->
+    <meta name="description" content="Thinkazoo Professional commission verification system for sales representatives">
     <meta name="author" content="Adam Gurley">
+    <meta name="copyright" content="© 2025 Adam Gurley. All Rights Reserved.">
     <meta name="robots" content="noindex, nofollow">
+    
+    <!-- Modern font loading with display swap -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
+    
+    <!-- Critical CSS inlined for performance -->
+    <style>
+        /* Critical path CSS - immediate loading */
+        * { box-sizing: border-box; }
+        html { font-size: 16px; }
+        body {
+            margin: 0;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #0a0a0a;
+            color: #ffffff;
+            overflow-x: hidden;
+            position: relative;
+        }
+        .container { max-width: 1200px; margin: 0 auto; padding: 16px; }
+        @media (min-width: 768px) { .container { padding: 32px; } }
+        @media (min-width: 1024px) { .container { padding: 40px; } }
+        
+        /* Turnstile styling */
+        .turnstile-container {
+            display: flex;
+            justify-content: center;
+            margin: 20px 0;
+            padding: 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .security-notice {
+            text-align: center;
+            font-size: 0.875rem;
+            color: rgba(255, 255, 255, 0.7);
+            margin-top: 8px;
+        }
+        
+        /* Footer banner styling */
+        .footer-banner {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-top: 24px;
+            padding-top: 24px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .footer-banner a {
+            display: block;
+            transition: transform 0.3s ease, opacity 0.3s ease;
+        }
+        
+        .footer-banner a:hover {
+            transform: scale(1.05);
+            opacity: 0.9;
+        }
+        
+        .footer-banner img {
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+    </style>
+    
+    <!-- Skip link for accessibility -->
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="page-shell">
-        <header class="app-header">
-            <div class="brand" role="presentation">
-                <img src="dllogoonly.png" alt="Thinkazoo commission robot" class="brand__logo">
-                <div class="brand__copy">
-                    <p class="brand__overline">Thinkazoo Commission Verification Web App</p>
-                    <h1 class="brand__title">Commission Confidence Console</h1>
-                    <p class="brand__subtitle">Enterprise verification with a cyber-secure glow</p>
+    <!-- Accessibility announcements -->
+    <div aria-live="polite" aria-atomic="true" class="sr-only" id="announcements"></div>
+    
+    <!-- Background pattern -->
+    <div class="background-pattern" aria-hidden="true"></div>
+    
+    <!-- Main container -->
+    <div class="container">
+        <!-- Header -->
+        <header class="header" role="banner">
+            <div class="brand-container">
+                <div class="brand-icon">
+                    <img src="dllogoonly.png" alt="Commission Magician Robot" class="robot-logo">
+                </div>
+                <div class="brand-text">
+                    <h1 class="brand-title">
+                        <span class="title-main">COMMISSION</span>
+                        <span class="title-sub">MAGICIAN</span>
+                    </h1>
+                    <p class="brand-subtitle">Semi-Professional verification system</p>
                 </div>
             </div>
-            <div class="session-indicator" aria-live="polite">
-                <span class="session-indicator__dot" aria-hidden="true"></span>
-                <span class="session-indicator__label">Secure session</span>
-                <span class="session-indicator__time" id="session-clock">--:--:--</span>
+            
+            <div class="status-indicator">
+                <div class="status-dot"></div>
+                <span class="status-text">SYSTEM READY</span>
+            </div>
+            
+            <div class="time-display">
+                <span class="time-label">U KNOW WHAT TIME IT IS</span>
+                <span class="time-value" id="current-time">16:54:37</span>
             </div>
         </header>
 
-        <main id="main" class="app-main">
-            <section class="panel panel--upload" aria-labelledby="upload-title">
-                <div class="panel__header">
-                    <div>
-                        <p class="panel__eyebrow">Step 1</p>
-                        <h2 id="upload-title">Upload commission workbook</h2>
-                        <p class="panel__lede">Drag in your Excel file (XLS or XLSX) and we will verify tiers, bonuses, and discrepancies immediately.</p>
-                    </div>
-                </div>
-                <div class="panel__body">
-                    <div class="drop-zone" data-drop-zone role="button" tabindex="0" aria-describedby="drop-zone-help">
-                        <input type="file" name="commissionFile" id="commission-file" accept=".xlsx,.xls" class="drop-zone__input" data-file-input>
-                        <div class="drop-zone__content">
-                            <div class="drop-zone__icon" aria-hidden="true">📁</div>
-                            <p class="drop-zone__text">
-                                <span class="drop-zone__text-strong">Drag &amp; drop</span> your workbook here or
-                                <button type="button" class="link-button" data-browse>browse</button>
-                            </p>
-                            <p id="drop-zone-help" class="drop-zone__hint">Excel files up to 50&nbsp;MB are supported.</p>
+        <!-- Main content -->
+        <main id="main-content" role="main">
+            <!-- Commission structure section -->
+            <section class="section commission-structure" aria-labelledby="structure-title">
+                <h2 id="structure-title" class="section-title">COMMISSION STRUCTURE</h2>
+                
+                <div class="tier-grid">
+                    <div class="tier-card tier-1">
+                        <div class="tier-header">
+                            <h3>Tier 1</h3>
+                            <span class="tier-range">$0 - $9,999</span>
+                        </div>
+                        <div class="tier-rates">
+                            <div class="rate-item">
+                                <span class="rate-label">Repeat</span>
+                                <span class="rate-value">2%</span>
+                            </div>
+                            <div class="rate-item">
+                                <span class="rate-label">New Product</span>
+                                <span class="rate-value">3%</span>
+                            </div>
+                            <div class="rate-item">
+                                <span class="rate-label">Bonus</span>
+                                <span class="rate-value">$0</span>
+                            </div>
                         </div>
                     </div>
-                    <div class="upload-actions">
-                        <button type="button" class="button button--primary" data-upload-button disabled>
-                            <span class="button__label">Verify commission</span>
-                            <span class="button__spinner" aria-hidden="true"></span>
-                        </button>
-                        <p class="upload-actions__meta" data-file-meta>No file selected.</p>
+                    
+                    <div class="tier-card tier-2">
+                        <div class="tier-header">
+                            <h3>Tier 2</h3>
+                            <span class="tier-range">$10K - $49.9K</span>
+                        </div>
+                        <div class="tier-rates">
+                            <div class="rate-item">
+                                <span class="rate-label">Repeat</span>
+                                <span class="rate-value">1%</span>
+                            </div>
+                            <div class="rate-item">
+                                <span class="rate-label">New Product</span>
+                                <span class="rate-value">2%</span>
+                            </div>
+                            <div class="rate-item">
+                                <span class="rate-label">Bonus</span>
+                                <span class="rate-value">$100</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="tier-card tier-3">
+                        <div class="tier-header">
+                            <h3>Tier 3</h3>
+                            <span class="tier-range">$50K+</span>
+                        </div>
+                        <div class="tier-rates">
+                            <div class="rate-item">
+                                <span class="rate-label">Repeat</span>
+                                <span class="rate-value">0.5%</span>
+                            </div>
+                            <div class="rate-item">
+                                <span class="rate-label">New Product</span>
+                                <span class="rate-value">1.5%</span>
+                            </div>
+                            <div class="rate-item">
+                                <span class="rate-label">Bonus</span>
+                                <span class="rate-value">$300</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="incentive-note">
+                    <span class="note-icon">⚡</span>
+                    <span>Incentivized SKUs: Fixed 3%+</span>
+                </div>
+            </section>
+
+            <!-- File upload section -->
+            <section class="section upload-section" aria-labelledby="upload-title">
+                <h2 id="upload-title" class="section-title">Upload Nick's Report</h2>
+                
+                <div class="upload-container">
+                    <div class="upload-dropzone" 
+                         id="dropzone" 
+                         role="button" 
+                         tabindex="0" 
+                         aria-describedby="upload-instructions"
+                         aria-label="Upload Excel file">
+                        
+                        <div class="upload-icon">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                <polyline points="7,10 12,15 17,10"/>
+                                <line x1="12" y1="15" x2="12" y2="3"/>
+                            </svg>
+                        </div>
+                        
+                        <div class="upload-content">
+                            <h3 class="upload-title">Slide in here</h3>
+                            <p class="upload-subtitle">or click to browse</p>
+                            <div id="upload-instructions" class="upload-instructions">
+                                Upload Excel file - it just has to have TWO sheets (.xlsx, .xls - Max 50MB)
+                            </div>
+                        </div>
+                        
+                        <input type="file" 
+                               id="file-input" 
+                               accept=".xlsx,.xls" 
+                               class="sr-only"
+                               aria-describedby="upload-instructions">
+                    </div>
+                    
+                    <!-- File preview -->
+                    <div id="file-preview" class="file-preview hidden" role="region" aria-label="Selected file information">
+                        <div class="file-info">
+                            <div class="file-icon">📄</div>
+                            <div class="file-details">
+                                <div class="file-name" id="file-name"></div>
+                                <div class="file-meta">
+                                    <span id="file-size"></span>
+                                    <span class="file-status" id="file-status">Ready to verify</span>
+                                </div>
+                            </div>
+                            <button class="file-remove" id="remove-file" aria-label="Remove file">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Error display -->
+                    <div id="upload-errors" class="error-container hidden" role="alert" aria-live="polite">
+                        <!-- Error messages will be inserted here -->
+                    </div>
+                    
+                    <!-- Action button -->
+                    <button id="verify-btn" 
+                            class="primary-button full-width" 
+                            disabled 
+                            aria-describedby="verify-description">
+                        <span class="button-text">Verify Commission Data</span>
+                        <span class="button-loader hidden">
+                            <svg class="spinner" width="20" height="20" viewBox="0 0 24 24">
+                                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none" opacity="0.25"/>
+                                <path d="M4,12a8,8 0 0,1 16,0" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round">
+                                    <animateTransform attributeName="transform" type="rotate" dur="1s" values="0 12 12;360 12 12" repeatCount="indefinite"/>
+                                </path>
+                            </svg>
+                        </span>
+                    </button>
+                    <div id="verify-description" class="button-description">
+                        Upload a CSV file to enable verification
                     </div>
                 </div>
             </section>
 
-            <section class="panel panel--results is-hidden" id="results-panel" aria-live="polite" aria-labelledby="results-title">
-                <div class="panel__header">
-                    <div>
-                        <p class="panel__eyebrow">Step 2</p>
-                        <h2 id="results-title">Verification summary</h2>
-                        <p class="panel__lede" data-results-meta>Upload a workbook to see results.</p>
+            <!-- Progress section -->
+            <section id="progress-section" class="section progress-section hidden" aria-live="polite">
+                <div class="progress-container">
+                    <h3 class="progress-title">Processing Your Data</h3>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
                     </div>
-                    <div class="panel__actions">
-                        <button type="button" class="button button--ghost" data-download-csv disabled>Download CSV report</button>
-                        <button type="button" class="button button--accent" data-generate-pdf disabled>Generate color PDF</button>
+                    <div class="progress-stats">
+                        <span class="progress-text" id="progress-text">Initializing verification...</span>
+                        <span class="progress-percent" id="progress-percent">0%</span>
                     </div>
                 </div>
-                <div class="panel__body">
-                    <div class="summary-grid" role="list">
-                        <article class="summary-card" role="listitem">
-                            <h3>Total sales</h3>
-                            <p class="summary-card__value" data-field="totalSales">$0.00</p>
-                            <p class="summary-card__detail">Across processed rows</p>
-                        </article>
-                        <article class="summary-card" role="listitem">
-                            <h3>Discrepancies</h3>
-                            <p class="summary-card__value" data-field="discrepancyCount">0</p>
-                            <p class="summary-card__detail">Rows exceeding ±$0.50 tolerance</p>
-                        </article>
-                        <article class="summary-card" role="listitem">
-                            <h3>Total bonus</h3>
-                            <p class="summary-card__value" data-field="totalBonus">$0.00</p>
-                            <p class="summary-card__detail">State bonuses earned</p>
-                        </article>
-                        <article class="summary-card" role="listitem">
-                            <h3>Average variance</h3>
-                            <p class="summary-card__value" data-field="averageVariance">$0.00</p>
-                            <p class="summary-card__detail">Across repeat, new, incentive</p>
-                        </article>
-                    </div>
+            </section>
 
-                    <div class="state-analysis">
-                        <div class="section-heading">
-                            <h3>State analysis</h3>
-                            <p>Breakdown of sales volume, tier placement, and bonuses by state.</p>
+            <!-- Results section -->
+            <section id="results-section" class="section results-section hidden" aria-labelledby="results-title">
+                <h2 id="results-title" class="section-title">OMARIO!!!</h2>
+                
+                <!-- Summary cards -->
+                <div class="summary-grid">
+                    <div class="summary-card">
+                        <div class="card-icon">📊</div>
+                        <div class="card-content">
+                            <div class="card-value" id="total-transactions">-</div>
+                            <div class="card-label">Transactions</div>
                         </div>
-                        <div class="table-wrapper">
-                            <table class="data-table" id="state-table">
+                    </div>
+                    
+                    <div class="summary-card">
+                        <div class="card-icon">🗺️</div>
+                        <div class="card-content">
+                            <div class="card-value" id="total-states">-</div>
+                            <div class="card-label">States</div>
+                        </div>
+                    </div>
+                    
+                    <div class="summary-card">
+                        <div class="card-icon">💰</div>
+                        <div class="card-content">
+                            <div class="card-value" id="calculated-commission">-</div>
+                            <div class="card-label">Calculated</div>
+                        </div>
+                    </div>
+                    
+                    <div class="summary-card">
+                        <div class="card-icon">✓</div>
+                        <div class="card-content">
+                            <div class="card-value" id="verification-status">-</div>
+                            <div class="card-label">Status</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Commission breakdown -->
+                <div class="breakdown-section">
+                    <h3 class="subsection-title">Commission Breakdown</h3>
+                    <div class="breakdown-grid">
+                        <div class="breakdown-item">
+                            <span class="breakdown-label">Repeat Product</span>
+                            <span class="breakdown-value" id="repeat-commission">-</span>
+                        </div>
+                        <div class="breakdown-item">
+                            <span class="breakdown-label">New Product</span>
+                            <span class="breakdown-value" id="new-commission">-</span>
+                        </div>
+                        <div class="breakdown-item">
+                            <span class="breakdown-label">Incentive Product</span>
+                            <span class="breakdown-value" id="incentive-commission">-</span>
+                        </div>
+                        <div class="breakdown-item">
+                            <span class="breakdown-label">State Bonuses</span>
+                            <span class="breakdown-value" id="state-bonuses">-</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- State analysis -->
+                <div class="analysis-section">
+                    <div class="collapsible-header" id="state-header" role="button" tabindex="0" aria-expanded="false" aria-controls="state-content">
+                        <h3 class="subsection-title">State Analysis</h3>
+                        <div class="collapsible-icon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="6,9 12,15 18,9"></polyline>
+                            </svg>
+                        </div>
+                    </div>
+                    <div class="collapsible-content" id="state-content" aria-labelledby="state-header">
+                        <div class="table-container">
+                            <table class="results-table" id="state-table">
                                 <thead>
                                     <tr>
-                                        <th scope="col">State</th>
-                                        <th scope="col">Tier</th>
-                                        <th scope="col">Sales</th>
-                                        <th scope="col">Bonus</th>
-                                        <th scope="col">Variance (repeat)</th>
-                                        <th scope="col">Variance (new)</th>
-                                        <th scope="col">Variance (incentive)</th>
+                                        <th>State</th>
+                                        <th>Total Sales</th>
+                                        <th>Tier</th>
+                                        <th>Commission</th>
+                                        <th>Bonus</th>
+                                        <th>Transactions</th>
                                     </tr>
                                 </thead>
-                                <tbody></tbody>
+                                <tbody>
+                                    <!-- State data will be inserted here -->
+                                </tbody>
                             </table>
                         </div>
                     </div>
+                </div>
 
-                    <div class="discrepancy-panel">
-                        <div class="section-heading">
-                            <h3>Discrepancy log</h3>
-                            <p data-discrepancy-hint>Waiting for verification…</p>
+                <!-- Discrepancies -->
+                <div class="analysis-section">
+                    <div class="collapsible-header" id="discrepancies-header" role="button" tabindex="0" aria-expanded="false" aria-controls="discrepancies-content">
+                        <h3 class="subsection-title">Discrepancies</h3>
+                        <div class="discrepancy-count" id="discrepancy-count">0</div>
+                        <div class="collapsible-icon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="6,9 12,15 18,9"></polyline>
+                            </svg>
                         </div>
-                        <div class="table-wrapper">
-                            <table class="data-table" id="discrepancy-table">
+                    </div>
+                    <div class="collapsible-content" id="discrepancies-content" aria-labelledby="discrepancies-header">
+                        <div class="table-container">
+                            <table class="results-table" id="discrepancies-table">
                                 <thead>
                                     <tr>
-                                        <th scope="col">Row</th>
-                                        <th scope="col">Invoice</th>
-                                        <th scope="col">Customer</th>
-                                        <th scope="col">State</th>
-                                        <th scope="col">Type</th>
-                                        <th scope="col">Expected</th>
-                                        <th scope="col">Reported</th>
-                                        <th scope="col">Variance</th>
+                                        <th>Invoice</th>
+                                        <th>State</th>
+                                        <th>We Calculated</th>
+                                        <th>Reported by DL</th>
+                                        <th>Difference</th>
                                     </tr>
                                 </thead>
-                                <tbody></tbody>
+                                <tbody>
+                                    <!-- Discrepancy data will be inserted here -->
+                                </tbody>
                             </table>
                         </div>
                     </div>
+                </div>
 
-                    <div class="detail-preview">
-                        <div class="section-heading">
-                            <h3>Detail preview</h3>
-                            <p data-preview-meta>Previewing the first 0 rows.</p>
-                        </div>
-                        <div class="table-wrapper">
-                            <table class="data-table" id="detail-table">
-                                <thead>
-                                    <tr>
-                                        <th scope="col">Row</th>
-                                        <th scope="col">Invoice</th>
-                                        <th scope="col">Customer</th>
-                                        <th scope="col">State</th>
-                                        <th scope="col">Tier</th>
-                                        <th scope="col">Sales</th>
-                                        <th scope="col">Repeat Δ</th>
-                                        <th scope="col">New Δ</th>
-                                        <th scope="col">Incentive Δ</th>
-                                    </tr>
-                                </thead>
-                                <tbody></tbody>
-                            </table>
-                        </div>
-                        <p class="detail-preview__hint">Download the CSV or PDF report for full transaction level detail.</p>
-                    </div>
+                <!-- Download section -->
+                <div class="download-section">
+                    <button id="download-btn" class="secondary-button full-width" disabled>
+                        <span class="button-text">Download Detailed PDF Report</span>
+                        <span class="button-icon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-15"/>
+                                <polyline points="7,10 12,15 17,10"/>
+                                <line x1="12" y1="15" x2="12" y2="3"/>
+                            </svg>
+                        </span>
+                    </button>
                 </div>
             </section>
         </main>
 
-        <footer class="app-footer">
-            <p>© 2025 Adam Gurley – Thinkazoo Commission Verifier. All Rights Reserved.</p>
-            <p>Secure processing • No data retention • Designed for Digital Ocean App Platform</p>
+        <!-- Footer -->
+        <footer class="footer" role="contentinfo">
+            <div class="footer-content">
+                <div class="footer-brand">
+                    <span class="footer-title">Thinkazoo Commission Verifier</span>
+                    <span class="footer-version">v2.1.0</span>
+                </div>
+                          <div class="footer-banner">
+                <span href="https://www.stickermule.com/unlock?ref_id=7471996701&utm_medium=embed&utm_source=invite&utm_content=250x250" target="_blank">
+                    <img alt="Custom Stickers, Die Cut Stickers, Bumper Stickers - Sticker Mule" 
+                         height="250" 
+                         src="https://cdn.stickermule.com/content/core/assets/banners/stickermule-invite-friends-square.png" 
+                         width="250" />
+                </span>
+            </div>
+                <div class="footer-meta">
+                    <span class="footer-copyright">© 2025 Adam Gurley. All Rights Reserved.</span>
+                    <span class="footer-security">🔒 Enterprise Security</span>
+                </div>
+            </div>
         </footer>
     </div>
 
-    <div class="sr-only" aria-live="polite" data-announcer></div>
-
-    <script defer src="script.js"></script>
+    <!-- Scripts -->
+    <script src="script.js"></script>
+    
+    <!-- Turnstile Integration Script -->
+    <script>
+        // Turnstile callback functions
+        window.onTurnstileSuccess = function(token) {
+            console.log('Turnstile verification successful');
+            // Enable the verify button
+            const verifyBtn = document.getElementById('verify-btn');
+            verifyBtn.disabled = false;
+            verifyBtn.setAttribute('data-turnstile-token', token);
+            
+            // Update button description
+            const description = document.getElementById('verify-description');
+            description.textContent = 'Security verified - Ready to process commission data';
+        };
+        
+        window.onTurnstileError = function(error) {
+            console.error('Turnstile verification failed:', error);
+            // Keep verify button disabled
+            const verifyBtn = document.getElementById('verify-btn');
+            verifyBtn.disabled = true;
+            
+            // Show error message
+            const description = document.getElementById('verify-description');
+            description.textContent = 'Security verification failed - Please refresh and try again';
+        };
+        
+        // Show Turnstile when file is uploaded
+        document.addEventListener('DOMContentLoaded', function() {
+            const fileInput = document.getElementById('csv-file');
+            const turnstileContainer = document.getElementById('turnstile-container');
+            const securityNotice = document.getElementById('security-notice');
+            
+            fileInput.addEventListener('change', function() {
+                if (this.files.length > 0) {
+                    // Show Turnstile when file is selected
+                    turnstileContainer.style.display = 'flex';
+                    securityNotice.style.display = 'block';
+                }
+            });
+        });
+    </script>
 </body>
 </html>
+
