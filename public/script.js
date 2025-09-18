@@ -1,1145 +1,745 @@
-// Application State Management
-const AppState = {
-    currentFile: null,
-    isProcessing: false,
-    results: null
-};
+(() => {
+    'use strict';
 
-// Utility Functions
-const Utils = {
-    formatFileSize(bytes) {
-        if (bytes === 0) return '0 Bytes';
-        const k = 1024;
-        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-    },
+    const MAX_FILE_SIZE = 50 * 1024 * 1024;
+    const ALLOWED_EXTENSIONS = ['.xlsx', '.xls'];
+    const PREVIEW_LIMIT = 25;
 
-    formatCurrency(amount) {
-        return new Intl.NumberFormat('en-US', {
-            style: 'currency',
-            currency: 'USD'
-        }).format(amount);
-    },
+    const dropZone = document.querySelector('[data-drop-zone]');
+    const fileInput = document.querySelector('[data-file-input]');
+    const browseButton = document.querySelector('[data-browse]');
+    const uploadButton = document.querySelector('[data-upload-button]');
+    const fileMeta = document.querySelector('[data-file-meta]');
+    const resultsPanel = document.getElementById('results-panel');
+    const resultsMeta = document.querySelector('[data-results-meta]');
+    const csvButton = document.querySelector('[data-download-csv]');
+    const pdfButton = document.querySelector('[data-generate-pdf]');
+    const announcer = document.querySelector('[data-announcer]');
+    const stateTableBody = document.querySelector('#state-table tbody');
+    const discrepancyTableBody = document.querySelector('#discrepancy-table tbody');
+    const discrepancyHint = document.querySelector('[data-discrepancy-hint]');
+    const detailTableBody = document.querySelector('#detail-table tbody');
+    const previewMeta = document.querySelector('[data-preview-meta]');
+    const sessionClock = document.getElementById('session-clock');
 
-    announce(message, priority = 'polite') {
-        const announcer = document.createElement('div');
-        announcer.setAttribute('aria-live', priority);
-        announcer.setAttribute('aria-atomic', 'true');
-        announcer.className = 'sr-only';
-        announcer.textContent = message;
-        document.body.appendChild(announcer);
-        setTimeout(() => document.body.removeChild(announcer), 1000);
-    },
+    const summaryFields = {
+        totalSales: document.querySelector('[data-field="totalSales"]'),
+        discrepancyCount: document.querySelector('[data-field="discrepancyCount"]'),
+        totalBonus: document.querySelector('[data-field="totalBonus"]'),
+        averageVariance: document.querySelector('[data-field="averageVariance"]')
+    };
 
-    scrollToElement(elementId) {
-        const element = document.getElementById(elementId);
-        if (!element) return;
-        
-        const headerHeight = 80;
-        const elementPosition = element.getBoundingClientRect().top;
-        const offsetPosition = elementPosition + window.pageYOffset - headerHeight;
+    const currencyFormatter = new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: 'USD',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    });
 
-        window.scrollTo({
-            top: offsetPosition,
-            behavior: 'smooth'
-        });
-    }
-};
+    const integerFormatter = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
+    const dateTimeFormatter = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short' });
 
-// File Upload Manager
-const FileUploadManager = {
-    init() {
-        const dropzone = document.getElementById('dropzone');
-        const fileInput = document.getElementById('file-input');
-        const removeBtn = document.getElementById('remove-file');
+    let selectedFile = null;
+    let currentReport = null;
+    let cachedLogoDataUrl = null;
 
-        if (!dropzone || !fileInput) return;
-
-        // File input change handler
-        fileInput.addEventListener('change', this.handleFileSelect.bind(this));
-        
-        // Remove file handler
-        if (removeBtn) {
-            removeBtn.addEventListener('click', this.removeFile.bind(this));
+    const libraryLoader = {
+        jsPdfPromise: null,
+        autoTablePromise: null,
+        async loadJsPdf() {
+            if (!this.jsPdfPromise) {
+                this.jsPdfPromise = new Promise((resolve, reject) => {
+                    const script = document.createElement('script');
+                    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+                    script.onload = () => {
+                        if (window.jspdf?.jsPDF) {
+                            resolve(window.jspdf.jsPDF);
+                        } else {
+                            reject(new Error('jsPDF failed to load.'));
+                        }
+                    };
+                    script.onerror = () => reject(new Error('Unable to load jsPDF library.'));
+                    document.head.appendChild(script);
+                });
+            }
+            return this.jsPdfPromise;
+        },
+        async loadAutoTable() {
+            await this.loadJsPdf();
+            if (!this.autoTablePromise) {
+                this.autoTablePromise = new Promise((resolve, reject) => {
+                    const script = document.createElement('script');
+                    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js';
+                    script.onload = () => {
+                        if (window.jspdf?.jsPDF?.API?.autoTable) {
+                            resolve();
+                        } else {
+                            reject(new Error('jsPDF autoTable failed to initialise.'));
+                        }
+                    };
+                    script.onerror = () => reject(new Error('Unable to load jsPDF autoTable plugin.'));
+                    document.head.appendChild(script);
+                });
+            }
+            return this.autoTablePromise;
         }
+    };
 
-        // Dropzone handlers
-        dropzone.addEventListener('click', () => fileInput.click());
-        dropzone.addEventListener('dragover', this.handleDragOver.bind(this));
-        dropzone.addEventListener('dragleave', this.handleDragLeave.bind(this));
-        dropzone.addEventListener('drop', this.handleDrop.bind(this));
+    function init() {
+        bindEvents();
+        startClock();
+        announce('Ready for verification. Upload a workbook to begin.');
+    }
 
-        // Keyboard support for dropzone
-        dropzone.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
+    function bindEvents() {
+        dropZone.addEventListener('dragover', event => {
+            event.preventDefault();
+            dropZone.classList.add('is-active');
+        });
+
+        dropZone.addEventListener('dragenter', event => {
+            event.preventDefault();
+            dropZone.classList.add('is-active');
+        });
+
+        dropZone.addEventListener('dragleave', event => {
+            if (event.relatedTarget && dropZone.contains(event.relatedTarget)) {
+                return;
+            }
+            dropZone.classList.remove('is-active');
+        });
+
+        dropZone.addEventListener('drop', event => {
+            event.preventDefault();
+            dropZone.classList.remove('is-active');
+            const file = event.dataTransfer?.files?.[0];
+            if (file) {
+                handleFileSelection(file);
+            }
+        });
+
+        dropZone.addEventListener('keydown', event => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
                 fileInput.click();
             }
         });
-    },
 
-    handleFileSelect(event) {
-        const file = event.target.files[0];
-        if (file) {
-            this.processFile(file);
-        }
-    },
+        fileInput.addEventListener('change', event => {
+            const file = event.target.files?.[0];
+            if (file) {
+                handleFileSelection(file);
+            }
+        });
 
-    handleDragOver(event) {
-        event.preventDefault();
-        event.stopPropagation();
-        const dropzone = document.getElementById('dropzone');
-        dropzone.classList.add('drag-over');
-    },
-
-    handleDragLeave(event) {
-        event.preventDefault();
-        event.stopPropagation();
-        const dropzone = document.getElementById('dropzone');
-        dropzone.classList.remove('drag-over');
-    },
-
-    handleDrop(event) {
-        event.preventDefault();
-        event.stopPropagation();
-        
-        const dropzone = document.getElementById('dropzone');
-        dropzone.classList.remove('drag-over');
-        
-        const files = event.dataTransfer.files;
-        if (files.length > 0) {
-            this.processFile(files[0]);
-        }
-    },
-
-    processFile(file) {
-        // Clear any previous errors
-        this.clearErrors();
-
-        // Validate file type
-        const validExtensions = ['.xlsx', '.xls'];
-        const fileExtension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
-        if (!validExtensions.includes(fileExtension)) {
-            this.showError('Please select an Excel file (.xlsx or .xls) only.');
-            return;
-        }
-
-        // Validate file size (50MB limit for Excel files)
-        const maxSize = 50 * 1024 * 1024; // 50MB
-        if (file.size > maxSize) {
-            this.showError('File size must be less than 50MB.');
-            return;
-        }
-
-        // Store file and update UI
-        ReportGenerator.disable();
-        AppState.currentFile = file;
-        this.showFilePreview(file);
-        this.updateVerifyButton();
-        
-        Utils.announce(`Excel file ${file.name} selected successfully`);
-    },
-
-    showFilePreview(file) {
-        const preview = document.getElementById('file-preview');
-        const fileName = document.getElementById('file-name');
-        const fileSize = document.getElementById('file-size');
-        const fileStatus = document.getElementById('file-status');
-
-        if (preview && fileName && fileSize && fileStatus) {
-            fileName.textContent = file.name;
-            fileSize.textContent = Utils.formatFileSize(file.size);
-            fileStatus.textContent = 'Ready to verify';
-            
-            preview.classList.remove('hidden');
-        }
-    },
-
-    removeFile() {
-        AppState.currentFile = null;
-        
-        const preview = document.getElementById('file-preview');
-        const fileInput = document.getElementById('file-input');
-        
-        if (preview) preview.classList.add('hidden');
-        if (fileInput) fileInput.value = '';
-
-        this.updateVerifyButton();
-        this.clearErrors();
-
-        ReportGenerator.disable();
-
-        Utils.announce('File removed');
-    },
-
-    updateVerifyButton() {
-        const verifyBtn = document.getElementById('verify-btn');
-        const description = document.getElementById('verify-description');
-        
-        if (!verifyBtn || !description) return;
-
-        if (AppState.currentFile) {
-            verifyBtn.disabled = false;
-            verifyBtn.classList.remove('disabled');
-            description.textContent = 'Ready to process commission data';
-        } else {
-            verifyBtn.disabled = true;
-            verifyBtn.classList.add('disabled');
-            description.textContent = 'Upload an Excel file to enable verification';
-        }
-    },
-
-    showError(message) {
-        const errorContainer = document.getElementById('upload-errors');
-        if (!errorContainer) return;
-
-        errorContainer.innerHTML = `
-            <div class="error-message">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="12" r="10"/>
-                    <line x1="15" y1="9" x2="9" y2="15"/>
-                    <line x1="9" y1="9" x2="15" y2="15"/>
-                </svg>
-                ${message}
-            </div>
-        `;
-        errorContainer.classList.remove('hidden');
-        
-        Utils.announce(message, 'assertive');
-    },
-
-    clearErrors() {
-        const errorContainer = document.getElementById('upload-errors');
-        if (errorContainer) {
-            errorContainer.classList.add('hidden');
-            errorContainer.innerHTML = '';
-        }
+        browseButton.addEventListener('click', () => fileInput.click());
+        uploadButton.addEventListener('click', () => selectedFile && verifyFile(selectedFile));
+        csvButton.addEventListener('click', () => currentReport && downloadCsv());
+        pdfButton.addEventListener('click', () => currentReport && generatePdf());
     }
-};
 
-// Progress Manager
-const ProgressManager = {
-    show() {
-        const section = document.getElementById('progress-section');
-        if (section) {
-            section.classList.remove('hidden');
-            Utils.scrollToElement('progress-section');
-        }
-    },
-
-    hide() {
-        const section = document.getElementById('progress-section');
-        if (section) {
-            section.classList.add('hidden');
-        }
-    },
-
-    update(percent, message) {
-        const fill = document.getElementById('progress-fill');
-        const text = document.getElementById('progress-text');
-        const percentElement = document.getElementById('progress-percent');
-
-        if (fill) fill.style.width = `${percent}%`;
-        if (text) text.textContent = message;
-        if (percentElement) percentElement.textContent = `${percent}%`;
-    }
-};
-
-// Results Manager - FIXED TO MATCH SERVER RESPONSE
-const ResultsManager = {
-    show(results) {
-        console.log('Received results:', results);
-        AppState.results = results;
-        ReportGenerator.enable(results);
-
-        this.updateSummaryCards(results);
-        this.updateCommissionBreakdown(results);
-        this.updateStateAnalysis(results.state_analysis);
-        this.updateDiscrepancies(results.discrepancies);
-        
-        const section = document.getElementById('results-section');
-        if (section) {
-            section.classList.remove('hidden');
-            Utils.scrollToElement('results-section');
-        }
-        
-        Utils.announce('Verification results are now available');
-    },
-
-    updateSummaryCards(results) {
-        // Calculate total transactions from state analysis
-        const totalTransactions = results.state_analysis ? 
-            results.state_analysis.reduce((sum, state) => sum + parseInt(state.transactions || 0), 0) : 0;
-        
-        const totalStates = results.state_analysis ? results.state_analysis.length : 0;
-        
-        const elements = {
-            'total-transactions': totalTransactions,
-            'total-states': totalStates,
-            'calculated-commission': Utils.formatCurrency(parseFloat(results.summary?.my_calculated_total || 0))
+    function startClock() {
+        const tick = () => {
+            const now = new Date();
+            if (sessionClock) {
+                sessionClock.textContent = now.toLocaleTimeString('en-US', {
+                    hour12: false,
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                });
+            }
         };
 
-        Object.entries(elements).forEach(([id, value]) => {
-            const element = document.getElementById(id);
-            if (element) element.textContent = value;
-        });
-
-        const statusElement = document.getElementById('verification-status');
-        if (statusElement) {
-            const rawStatus = results.summary?.percentage_status ?? 'Complete';
-            const statusText = typeof rawStatus === 'string' ? rawStatus : String(rawStatus);
-            statusElement.textContent = statusText;
-            statusElement.classList.toggle('status-error', statusText.toUpperCase().includes('ERROR'));
-        }
-    },
-
-    updateCommissionBreakdown(results) {
-        // Calculate breakdown from state analysis
-        let repeatCommission = 0;
-        let newProductCommission = 0;
-        let incentiveCommission = 0;
-        let stateBonuses = 0;
-        
-        if (results.state_analysis) {
-            results.state_analysis.forEach(state => {
-                stateBonuses += parseFloat(state.bonus || 0);
-            });
-        }
-        
-        // Use summary data for commission totals
-        const totalCommission = parseFloat(results.summary?.my_calculated_commission || 0);
-        const totalBonuses = parseFloat(results.summary?.my_calculated_bonuses || 0);
-        
-        const elements = {
-            'repeat-commission': Utils.formatCurrency(totalCommission * 0.4), // Approximate split
-            'new-commission': Utils.formatCurrency(totalCommission * 0.6), // Approximate split
-            'incentive-commission': Utils.formatCurrency(0), // Not separately tracked
-            'state-bonuses': Utils.formatCurrency(totalBonuses)
-        };
-
-        Object.entries(elements).forEach(([id, value]) => {
-            const element = document.getElementById(id);
-            if (element) element.textContent = value;
-        });
-    },
-
-    updateStateAnalysis(stateAnalysis) {
-        if (!stateAnalysis || !Array.isArray(stateAnalysis)) return;
-
-        const tableBody = document.querySelector('#state-table tbody');
-        if (!tableBody) return;
-        
-        // Clear existing rows
-        tableBody.innerHTML = '';
-        
-        // Add state data rows
-        stateAnalysis.forEach(state => {
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td>${state.state || 'N/A'}</td>
-                <td>${Utils.formatCurrency(parseFloat(state.total_sales || 0))}</td>
-                <td>${state.tier || 'N/A'}</td>
-                <td>${Utils.formatCurrency(parseFloat(state.my_calculated_commission || 0))}</td>
-                <td>${Utils.formatCurrency(parseFloat(state.bonus || 0))}</td>
-                <td>${state.transactions || 0}</td>
-            `;
-            tableBody.appendChild(row);
-        });
-
-        // Show the state analysis section
-        if (!CollapsibleManager.expandSection('state-header')) {
-            const stateSection = document.getElementById('state-content');
-            if (stateSection) {
-                stateSection.style.display = 'block';
-                stateSection.style.maxHeight = `${stateSection.scrollHeight}px`;
-                stateSection.setAttribute('aria-hidden', 'false');
-            }
-            // Ensure section appears expanded for screen readers and keyboard users
-            const stateHeader = document.getElementById('state-header');
-            if (stateHeader) {
-                stateHeader.setAttribute('aria-expanded', 'true');
-            }
-        }
-    },
-
-    updateDiscrepancies(discrepancies) {
-        if (!discrepancies || !Array.isArray(discrepancies)) {
-            discrepancies = [];
-        }
-        
-        // Update discrepancy count
-        const countElement = document.getElementById('discrepancy-count');
-        if (countElement) {
-            countElement.textContent = discrepancies.length;
-        }
-        
-        const tableBody = document.querySelector('#discrepancies-table tbody');
-        if (!tableBody) return;
-        
-        // Clear existing rows
-        tableBody.innerHTML = '';
-        
-        if (discrepancies.length === 0) {
-            // Show "no discrepancies" message
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td colspan="5" style="text-align: center; color: #4CAF50; font-weight: bold;">
-                    ✅ No discrepancies found - all calculations are accurate!
-                </td>
-            `;
-            tableBody.appendChild(row);
-        } else {
-            // Add discrepancy rows
-            discrepancies.forEach(discrepancy => {
-                const row = document.createElement('tr');
-                const difference = parseFloat(discrepancy.difference || 0);
-                const differenceClass = difference > 0 ? 'positive' : difference < 0 ? 'negative' : 'neutral';
-                
-                row.innerHTML = `
-                    <td>${discrepancy.invoice || 'N/A'}</td>
-                    <td>${discrepancy.customer || 'N/A'}</td>
-                    <td>${Utils.formatCurrency(parseFloat(discrepancy.my_calculated || 0))}</td>
-                    <td>${Utils.formatCurrency(parseFloat(discrepancy.detail_reported || 0))}</td>
-                    <td class="${differenceClass}">${Utils.formatCurrency(difference)}</td>
-                `;
-                tableBody.appendChild(row);
-            });
-        }
-
-        // Show the discrepancies section
-        if (!CollapsibleManager.expandSection('discrepancies-header')) {
-            const discrepanciesSection = document.getElementById('discrepancies-content');
-            if (discrepanciesSection) {
-                discrepanciesSection.style.display = 'block';
-                discrepanciesSection.style.maxHeight = `${discrepanciesSection.scrollHeight}px`;
-                discrepanciesSection.setAttribute('aria-hidden', 'false');
-            }
-
-            const discrepanciesHeader = document.getElementById('discrepancies-header');
-            if (discrepanciesHeader) {
-                discrepanciesHeader.setAttribute('aria-expanded', 'true');
-            }
-        }
+        tick();
+        setInterval(tick, 1000);
     }
-};
 
-// Commission Verification Handler
-const CommissionVerifier = {
-    async verify() {
-        if (!AppState.currentFile) {
-            FileUploadManager.showError('Please select an Excel file');
+    function handleFileSelection(file) {
+        const validationError = validateFile(file);
+        if (validationError) {
+            setFileMeta(validationError, 'error');
+            announce(validationError);
+            selectedFile = null;
+            uploadButton.disabled = true;
             return;
         }
 
-        if (AppState.isProcessing) return;
+        selectedFile = file;
+        setFileMeta(`Ready: ${file.name} (${formatBytes(file.size)})`);
+        uploadButton.disabled = false;
+        fileInput.value = '';
+        announce(`Selected ${file.name}. Press verify to begin.`);
+    }
 
-        AppState.isProcessing = true;
-        this.updateVerifyButton(true);
-        
+    function validateFile(file) {
+        if (!file) {
+            return 'Please choose a workbook to verify.';
+        }
+
+        const extensionMatch = file.name.match(/\.([^.]+)$/);
+        const extension = extensionMatch ? `.${extensionMatch[1].toLowerCase()}` : '';
+
+        if (!ALLOWED_EXTENSIONS.includes(extension)) {
+            return 'Unsupported file type. Upload an Excel workbook (.xlsx or .xls).';
+        }
+
+        if (file.size > MAX_FILE_SIZE) {
+            return 'File is larger than 50 MB. Please upload a smaller workbook.';
+        }
+
+        return '';
+    }
+
+    async function verifyFile(file) {
+        if (!file) {
+            return;
+        }
+
+        setUploadButtonLoading(true);
+        setFileMeta(`Verifying ${file.name}…`);
+        announce('Uploading workbook for verification.');
+
         try {
-            ProgressManager.show();
-            ProgressManager.update(10, 'Preparing file upload...');
-
             const formData = new FormData();
-            formData.append('excelFile', AppState.currentFile);
-
-            ProgressManager.update(30, 'Uploading and processing Excel data...');
-
-            // Add timeout and progress simulation for long processing
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout
-
-            // Simulate progress during long processing
-            let progressPercent = 30;
-            const progressInterval = setInterval(() => {
-                if (progressPercent < 65) {
-                    progressPercent += 5;
-                    ProgressManager.update(progressPercent, 'Processing Excel file... This may take up to 2 minutes for large files.');
-                }
-            }, 5000); // Update every 5 seconds
+            formData.append('commissionFile', file);
 
             const response = await fetch('/verify-commission', {
                 method: 'POST',
-                body: formData,
-                signal: controller.signal
+                body: formData
             });
-
-            clearTimeout(timeoutId);
-            clearInterval(progressInterval);
-            ProgressManager.update(70, 'Processing commission calculations...');
 
             if (!response.ok) {
-                const errorData = await response.json().catch(() => ({ error: 'Server error' }));
-                throw new Error(errorData.error || `Server returned ${response.status}: ${response.statusText}`);
+                const errorPayload = await tryParseJson(response);
+                const message = errorPayload?.error || 'Verification failed. Please try again.';
+                throw new Error(message);
             }
 
-            const results = await response.json();
-            console.log('Server response:', results);
-            
-            ProgressManager.update(100, 'Verification complete!');
-            
-            setTimeout(() => {
-                ProgressManager.hide();
-                ResultsManager.show(results);
-            }, 1000);
-
+            const data = await response.json();
+            currentReport = data;
+            renderResults(data);
+            setFileMeta(`Verified ${file.name}`, 'success');
+            announce(`Verification complete for ${file.name}.`);
         } catch (error) {
-            console.error('Verification error:', error);
-            ProgressManager.hide();
-            
-            let errorMessage = 'Failed to verify commission data';
-            if (error.name === 'AbortError') {
-                errorMessage = 'Processing timeout - file may be too large or complex. Please try with a smaller file.';
-            } else if (error.message.includes('Failed to fetch')) {
-                errorMessage = 'Network error - please check your connection and try again.';
-            } else {
-                errorMessage = error.message || errorMessage;
-            }
-            
-            FileUploadManager.showError(errorMessage);
+            console.error(error);
+            const message = error.message || 'Unexpected error during verification.';
+            setFileMeta(message, 'error');
+            announce(message);
         } finally {
-            AppState.isProcessing = false;
-            this.updateVerifyButton(false);
-        }
-    },
-
-    updateVerifyButton(isProcessing) {
-        const button = document.getElementById('verify-btn');
-        const buttonText = button?.querySelector('.button-text');
-        const buttonLoader = button?.querySelector('.button-loader');
-
-        if (!button || !buttonText || !buttonLoader) return;
-
-        if (isProcessing) {
-            button.disabled = true;
-            buttonText.textContent = 'Processing...';
-            buttonLoader.classList.remove('hidden');
-        } else {
-            FileUploadManager.updateVerifyButton();
-            buttonText.textContent = 'Verify Commission Data';
-            buttonLoader.classList.add('hidden');
+            setUploadButtonLoading(false);
         }
     }
-};
 
-// Collapsible sections handler
-const CollapsibleManager = {
-    sections: new Map(),
-
-    init() {
-        const headers = document.querySelectorAll('.collapsible-header');
-        headers.forEach(header => {
-            const contentId = header.getAttribute('aria-controls');
-            const content = document.getElementById(contentId);
-            if (!content) return;
-
-            this.sections.set(header.id, { header, content });
-
-            header.addEventListener('click', (event) => {
-                event.preventDefault();
-                this.toggle(header.id);
-            });
-
-            header.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    this.toggle(header.id);
-                }
-            });
-
-            const isExpanded = header.getAttribute('aria-expanded') === 'true';
-            this.applyState(header, content, isExpanded, false);
-        });
-    },
-
-    toggle(headerId) {
-        const entry = this.sections.get(headerId);
-        if (!entry) return;
-
-        const shouldExpand = entry.header.getAttribute('aria-expanded') !== 'true';
-        this.applyState(entry.header, entry.content, shouldExpand, true);
-    },
-
-    expandSection(headerId, options = {}) {
-        const entry = this.sections.get(headerId);
-        if (!entry) return false;
-
-        const { animate = false } = options;
-        this.applyState(entry.header, entry.content, true, animate);
-        return true;
-    },
-
-    collapseSection(headerId, options = {}) {
-        const entry = this.sections.get(headerId);
-        if (!entry) return false;
-
-        const { animate = false } = options;
-        this.applyState(entry.header, entry.content, false, animate);
-        return true;
-    },
-
-    applyState(header, content, expand, animate) {
-        if (!header || !content) return;
-
-        if (content._collapseListener) {
-            content.removeEventListener('transitionend', content._collapseListener);
-            content._collapseListener = null;
+    async function downloadCsv() {
+        if (!currentReport?.reportId) {
+            return;
         }
 
-        header.setAttribute('aria-expanded', expand.toString());
-        const icon = header.querySelector('.collapsible-icon svg'); 
-        if (icon) {
-            icon.style.transform = expand ? 'rotate(180deg)' : 'rotate(0deg)';
-        }
-
-        if (expand) {
-            content.setAttribute('aria-hidden', 'false');
-            content.style.display = 'block';
-
-            const setHeight = () => {
-                const targetHeight = content.scrollHeight;
-                content.style.maxHeight = `${targetHeight}px`;
-            };
-
-            if (animate) {
-                content.style.maxHeight = '0px';
-                requestAnimationFrame(setHeight);
-            } else {
-                setHeight();
-            }
-        } else {
-            content.setAttribute('aria-hidden', 'true');
-
-            const finalizeCollapse = () => {
-                if (header.getAttribute('aria-expanded') === 'false') {
-                    content.style.display = 'none';
-                    content.style.maxHeight = '0px';
-                }
-
-                if (content._collapseListener) {
-                    content.removeEventListener('transitionend', content._collapseListener);
-                    content._collapseListener = null;
-                }
-            };
-
-            if (animate) {
-                const startHeight = content.scrollHeight;
-                if (startHeight === 0) {
-                    finalizeCollapse();
-                    return;
-                }
-
-                content.style.maxHeight = `${startHeight}px`;
-                requestAnimationFrame(() => {
-                    content.style.maxHeight = '0px';
-                });
-
-                const handleTransitionEnd = (event) => {
-                    if (event.propertyName !== 'max-height') return;
-                    finalizeCollapse();
-                };
-
-                content._collapseListener = handleTransitionEnd;
-                content.addEventListener('transitionend', handleTransitionEnd);
-            } else {
-                finalizeCollapse();
-            }
-        }
-    }
-};
-
-// Detailed PDF report generator
-const ReportGenerator = {
-    button: null,
-    libraryPromise: null,
-    lastResults: null,
-    margin: 48,
-    lineHeight: 14,
-    maxDiscrepancyEntries: 15,
-
-    init() {
-        this.button = document.getElementById('download-btn');
-        if (!this.button) return;
-
-        this.disable();
-        this.button.addEventListener('click', async (event) => {
-            event.preventDefault();
-
-            const results = AppState.results || this.lastResults;
-            if (!results) {
-                alert('Upload and verify a commission file before downloading the report.');
-                return;
-            }
-
-            this.button.setAttribute('aria-busy', 'true');
-            this.button.classList.add('is-generating');
-
-            try {
-                await this.download(results);
-            } catch (error) {
-                console.error('Report generation failed:', error);
-                alert('Unable to generate the PDF report. Please try again.');
-            } finally {
-                this.button.classList.remove('is-generating');
-                this.button.removeAttribute('aria-busy');
-            }
-        });
-    },
-
-    enable(results) {
-        if (!this.button) return;
-        this.lastResults = results || AppState.results;
-        this.button.disabled = false;
-        this.button.classList.remove('disabled');
-        this.button.setAttribute('aria-disabled', 'false');
-        this.button.title = 'Download a PDF summary of the verification results';
-    },
-
-    disable() {
-        if (!this.button) return;
-        this.lastResults = null;
-        this.button.disabled = true;
-        this.button.classList.add('disabled');
-        this.button.setAttribute('aria-disabled', 'true');
-        this.button.title = 'Run a verification to enable report downloads';
-    },
-
-    async download(results) {
-        if (!results) {
-            throw new Error('No verification results available for report generation');
-        }
-
-        const jsPDFConstructor = await this.ensureLibrary();
-        const doc = new jsPDFConstructor({
-            orientation: 'portrait',
-            unit: 'pt',
-            format: 'letter'
-        });
-
-        const margin = this.margin;
-        const pageWidth = doc.internal.pageSize.getWidth();
-        const contentWidth = pageWidth - margin * 2;
-        let y = margin;
-
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(28);
-        doc.setTextColor(0, 0, 0);
-        doc.text('Commission Verification Report', margin, y);
-        y += this.lineHeight * 2;
-
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(12);
-
-        const headerLines = [
-            `Generated: ${new Date().toLocaleString()}`,
-            AppState.currentFile ? `Source File: ${AppState.currentFile.name}` : null,
-            `Discrepancies Identified: ${(Array.isArray(results.discrepancies) ? results.discrepancies.length : 0).toLocaleString('en-US')}`
-        ].filter(Boolean);
-
-        headerLines.forEach(line => {
-            const wrapped = this.wrapText(doc, line, contentWidth);
-            const requiredHeight = Math.max(this.lineHeight, wrapped.length * this.lineHeight);
-            y = this.ensureSpace(doc, y, margin, requiredHeight);
-            wrapped.forEach(wrappedLine => {
-                doc.text(wrappedLine, margin, y);
-                y += this.lineHeight;
-            });
-        });
-
-        y += 4;
-        doc.setDrawColor(200, 200, 200);
-        doc.line(margin, y, pageWidth - margin, y);
-        y += 20;
-
-        y = this.addSummary(doc, results, margin, contentWidth, y);
-        y = this.addStateHighlights(doc, results, margin, contentWidth, y);
-        y = this.addDiscrepancies(doc, results, margin, contentWidth, y);
-
-        doc.save(`commission-report-${this.formatDateForFilename(new Date())}.pdf`);
-        Utils.announce('Detailed PDF report downloaded');
-    },
-
-    async ensureLibrary() {
-        if (window.jspdf?.jsPDF) {
-            return window.jspdf.jsPDF;
-        }
-
-        if (!this.libraryPromise) {
-            this.libraryPromise = new Promise((resolve, reject) => {
-                const script = document.createElement('script');
-                script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
-                script.async = true;
-                script.onload = () => {
-                    if (window.jspdf?.jsPDF) {
-                        resolve(window.jspdf.jsPDF);
-                    } else {
-                        reject(new Error('PDF library loaded but jsPDF is unavailable'));
-                    }
-                };
-                script.onerror = () => reject(new Error('Failed to load PDF library'));
-                document.head.appendChild(script);
-            });
-        }
+        csvButton.disabled = true;
+        announce('Preparing CSV report.');
 
         try {
-            const jsPDFConstructor = await this.libraryPromise;
-            if (!jsPDFConstructor) {
-                throw new Error('PDF library unavailable after loading');
+            const response = await fetch('/download-report', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ reportId: currentReport.reportId })
+            });
+
+            if (!response.ok) {
+                const errorPayload = await tryParseJson(response);
+                const message = errorPayload?.error || 'Unable to generate CSV report.';
+                throw new Error(message);
             }
-            return jsPDFConstructor;
+
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `thinkazoo-commission-report-${formatTimestamp(new Date())}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            announce('CSV report downloaded.');
         } catch (error) {
-            this.libraryPromise = null;
-            throw error;
+            console.error(error);
+            resultsMeta.textContent = error.message;
+            announce(error.message);
+        } finally {
+            csvButton.disabled = false;
         }
-    },
+    }
 
-    addSummary(doc, results, margin, width, y) {
-        y = this.addSectionTitle(doc, 'Summary', margin, y);
-
-        const summary = results.summary || {};
-        const totalTransactions = Array.isArray(results.state_analysis)
-            ? results.state_analysis.reduce((sum, state) => sum + (this.parseInteger(state.transactions) ?? 0), 0)
-            : 0;
-        const totalStates = Array.isArray(results.state_analysis) ? results.state_analysis.length : 0;
-        const discrepancyCount = typeof summary.total_discrepancies === 'number'
-            ? summary.total_discrepancies
-            : (Array.isArray(results.discrepancies) ? results.discrepancies.length : 0);
-
-        const summaryItems = [
-            { label: 'Total Transactions Reviewed', value: totalTransactions.toLocaleString('en-US') },
-            { label: 'States Included', value: totalStates.toLocaleString('en-US') },
-            { label: 'Calculated Commission', value: this.formatCurrencyValue(summary.my_calculated_commission) },
-            { label: 'Calculated Bonuses', value: this.formatCurrencyValue(summary.my_calculated_bonuses) },
-            { label: 'Calculated Total', value: this.formatCurrencyValue(summary.my_calculated_total) },
-            { label: 'Reported Detail Total', value: this.formatCurrencyValue(summary.detail_reported_total) },
-            { label: 'Actual Payment (Summary)', value: this.formatCurrencyValue(summary.actual_payment) },
-            { label: 'Payment Difference vs Actual', value: this.formatCurrencyValue(summary.payment_difference), color: this.shouldHighlightDifference(summary.payment_difference) ? 'error' : 'default' },
-            { label: 'Payment Status', value: summary.payment_status || 'Unknown', color: summary.payment_status && summary.payment_status !== 'CORRECT' ? 'error' : 'default' },
-            { label: 'Verification Status', value: summary.percentage_status || 'Complete', color: this.isErrorStatus(summary.percentage_status) ? 'error' : 'default' },
-            { label: 'Discrepancies Found', value: discrepancyCount.toLocaleString('en-US'), color: discrepancyCount > 0 ? 'error' : 'default' }
-        ];
-
-        const labelWidth = Math.min(240, width * 0.45);
-        const valueWidth = Math.max(120, width - labelWidth);
-
-        summaryItems.forEach(item => {
-            const valueText = String(item.value ?? '');
-            const wrappedValue = this.wrapText(doc, valueText, valueWidth);
-            const requiredHeight = Math.max(this.lineHeight + 4, wrappedValue.length * this.lineHeight + 4);
-            y = this.ensureSpace(doc, y, margin, requiredHeight);
-
-            doc.setTextColor(0, 0, 0);
-            doc.setFont('helvetica', 'bold');
-            doc.text(item.label, margin, y);
-
-            const color = item.color === 'error' ? [220, 53, 69] : [0, 0, 0];
-            doc.setFont('helvetica', 'normal');
-            doc.setTextColor(...color);
-            wrappedValue.forEach((line, index) => {
-                doc.text(line, margin + labelWidth, y + (index * this.lineHeight));
-            });
-
-            y += wrappedValue.length * this.lineHeight + 8;
-        });
-
-        doc.setTextColor(0, 0, 0);
-        doc.setFont('helvetica', 'normal');
-        return y;
-    },
-
-    addStateHighlights(doc, results, margin, width, y) {
-        const states = Array.isArray(results.state_analysis) ? results.state_analysis : [];
-        if (!states.length) {
-            return y;
+    async function generatePdf() {
+        if (!currentReport) {
+            return;
         }
 
-        const topStates = states
-            .map(state => ({
-                data: state,
-                difference: this.parseNumber(state.commission_difference) ?? 0,
-                discrepancies: this.parseInteger(state.discrepancies_count) ?? 0
-            }))
-            .sort((a, b) => Math.abs(b.difference) - Math.abs(a.difference))
-            .slice(0, Math.min(5, states.length));
+        pdfButton.disabled = true;
+        announce('Building colorful PDF report.');
 
-        if (!topStates.length) {
-            return y;
+        try {
+            const jsPDF = await libraryLoader.loadJsPdf();
+            await libraryLoader.loadAutoTable();
+            const logoDataUrl = await fetchLogo();
+
+            const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+            const pageWidth = doc.internal.pageSize.getWidth();
+            const pageHeight = doc.internal.pageSize.getHeight();
+
+            drawPdfHeader(doc, pageWidth, logoDataUrl);
+            let currentY = 150;
+
+            currentY = drawPdfSummary(doc, currentY, pageWidth, currentReport.summary);
+            currentY = drawPdfStateTable(doc, currentY + 30, pageWidth, currentReport.stateBreakdown);
+            currentY = drawPdfDiscrepancies(doc, currentY + 40, currentReport.discrepancies);
+            drawPdfFooter(doc, pageHeight);
+
+            doc.save(`thinkazoo-commission-report-${formatTimestamp(new Date())}.pdf`);
+            announce('PDF report ready.');
+        } catch (error) {
+            console.error(error);
+            const message = error.message || 'Unable to generate PDF report.';
+            resultsMeta.textContent = message;
+            announce(message);
+        } finally {
+            pdfButton.disabled = false;
+        }
+    }
+
+    function drawPdfHeader(doc, pageWidth, logoDataUrl) {
+        doc.setFillColor(12, 27, 60);
+        doc.rect(0, 0, pageWidth, 120, 'F');
+
+        if (logoDataUrl) {
+            doc.addImage(logoDataUrl, 'PNG', 40, 26, 70, 70);
         }
 
-        y = this.addSectionTitle(doc, 'State Highlights', margin, y);
-        doc.setFont('helvetica', 'italic');
-        doc.setTextColor(100, 100, 100);
-        doc.text('Top states ranked by commission variance', margin, y);
-        y += this.lineHeight + 4;
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(0, 0, 0);
-
-        topStates.forEach(entry => {
-            const state = entry.data;
-            const header = `${state.state || 'N/A'} — ${this.formatCurrencyValue(state.total_sales)} in Sales`;
-            const headerLines = this.wrapText(doc, header, width);
-            const detailEntries = [
-                { text: `Tier ${state.tier || 'N/A'} • Transactions: ${this.formatCount(state.transactions)}`, color: 'default' },
-                { text: `Calculated vs Reported: ${this.formatCurrencyValue(state.my_calculated_commission)} vs ${this.formatCurrencyValue(state.detail_reported_commission)}`, color: 'default' },
-                { text: `Bonuses: ${this.formatCurrencyValue(state.bonus)}`, color: 'default' },
-                { text: `Commission Difference: ${this.formatCurrencyValue(state.commission_difference)}`, color: Math.abs(entry.difference) > 0.01 ? 'error' : 'default' },
-                { text: `Discrepancies Logged: ${this.formatCount(state.discrepancies_count)}`, color: entry.discrepancies > 0 ? 'error' : 'default' }
-            ];
-
-            detailEntries.forEach(item => {
-                item.lines = this.wrapText(doc, item.text, width);
-            });
-
-            const requiredHeight = headerLines.length * this.lineHeight +
-                detailEntries.reduce((sum, item) => sum + item.lines.length * this.lineHeight, 0) + 16;
-
-            y = this.ensureSpace(doc, y, margin, requiredHeight);
-
-            doc.setFont('helvetica', 'bold');
-            headerLines.forEach((line, index) => {
-                doc.text(line, margin, y + (index * this.lineHeight));
-            });
-
-            let blockBottom = y + headerLines.length * this.lineHeight;
-            doc.setFont('helvetica', 'normal');
-
-            detailEntries.forEach(item => {
-                item.lines.forEach(line => {
-                    blockBottom += this.lineHeight;
-                    if (item.color === 'error') {
-                        doc.setTextColor(220, 53, 69);
-                    } else {
-                        doc.setTextColor(0, 0, 0);
-                    }
-                    doc.text(line, margin, blockBottom);
-                });
-            });
-
-            doc.setTextColor(0, 0, 0);
-            y = blockBottom + 12;
-        });
-
-        return y;
-    },
-
-    addDiscrepancies(doc, results, margin, width, y) {
-        const discrepancies = Array.isArray(results.discrepancies) ? results.discrepancies : [];
-
-        y = this.addSectionTitle(doc, 'Detailed Discrepancies', margin, y);
-        doc.setFont('helvetica', 'italic');
-        doc.setTextColor(100, 100, 100);
-        doc.text('Each variance references the original Excel cell for rapid manager review.', margin, y);
-        y += this.lineHeight + 4;
-        doc.setFont('helvetica', 'normal');
-        doc.setTextColor(0, 0, 0);
-
-        if (!discrepancies.length) {
-            y = this.ensureSpace(doc, y, margin, this.lineHeight);
-            doc.text('No discrepancies were detected — reported and calculated totals align.', margin, y);
-            return y + this.lineHeight;
-        }
-
-        discrepancies.slice(0, this.maxDiscrepancyEntries).forEach((discrepancy, index) => {
-            const header = `${index + 1}. Invoice ${discrepancy.invoice || 'N/A'} — ${discrepancy.customer || 'Unknown State'}`;
-            const headerLines = this.wrapText(doc, header, width);
-            const commissionType = this.formatCommissionType(discrepancy.commission_type);
-            const diffNumber = this.parseNumber(discrepancy.difference) ?? 0;
-
-            const detailEntries = [
-                { text: `Sales Amount: ${this.formatCurrencyValue(discrepancy.sales_amount)} (${commissionType})`, color: 'default' },
-                { text: `Calculated vs Reported: ${this.formatCurrencyValue(discrepancy.my_calculated)} vs ${this.formatCurrencyValue(discrepancy.detail_reported)}`, color: 'default' },
-                { text: `Difference: ${this.formatCurrencyValue(discrepancy.difference)} (${discrepancy.status || 'Status Unknown'})`, color: Math.abs(diffNumber) > 0.01 ? 'error' : 'default' },
-                { text: `Excel Reference: ${this.formatSheetReference(discrepancy)}`, color: 'default' }
-            ];
-
-            detailEntries.forEach(item => {
-                item.lines = this.wrapText(doc, item.text, width);
-            });
-
-            const requiredHeight = headerLines.length * this.lineHeight +
-                detailEntries.reduce((sum, item) => sum + item.lines.length * this.lineHeight, 0) + 24;
-
-            y = this.ensureSpace(doc, y, margin, requiredHeight);
-
-            doc.setFont('helvetica', 'bold');
-            headerLines.forEach((line, lineIndex) => {
-                doc.text(line, margin, y + (lineIndex * this.lineHeight));
-            });
-
-            let blockBottom = y + headerLines.length * this.lineHeight;
-            doc.setFont('helvetica', 'normal');
-
-            detailEntries.forEach(item => {
-                item.lines.forEach(line => {
-                    blockBottom += this.lineHeight;
-                    if (item.color === 'error') {
-                        doc.setTextColor(220, 53, 69);
-                    } else {
-                        doc.setTextColor(0, 0, 0);
-                    }
-                    doc.text(line, margin, blockBottom);
-                });
-            });
-
-            doc.setTextColor(0, 0, 0);
-            y = blockBottom + 16;
-        });
-
-        if (discrepancies.length > this.maxDiscrepancyEntries) {
-            const remaining = discrepancies.length - this.maxDiscrepancyEntries;
-            const notice = `+${remaining} additional discrepancies not shown in this summary.`;
-            const noticeLines = this.wrapText(doc, notice, width);
-            const requiredHeight = noticeLines.length * this.lineHeight + 6;
-            y = this.ensureSpace(doc, y, margin, requiredHeight);
-            doc.setFont('helvetica', 'italic');
-            doc.setTextColor(100, 100, 100);
-            noticeLines.forEach((line, idx) => {
-                doc.text(line, margin, y + (idx * this.lineHeight));
-            });
-            doc.setFont('helvetica', 'normal');
-            doc.setTextColor(0, 0, 0);
-            y += noticeLines.length * this.lineHeight + 4;
-        }
-
-        return y;
-    },
-
-    addSectionTitle(doc, title, margin, y) {
-        y = this.ensureSpace(doc, y, margin, this.lineHeight * 2);
+        doc.setTextColor(255, 255, 255);
         doc.setFont('helvetica', 'bold');
-        doc.setFontSize(16);
-        doc.setTextColor(0, 0, 0);
-        doc.text(title, margin, y);
-        y += this.lineHeight + 4;
+        doc.setFontSize(20);
+        doc.text('Thinkazoo Commission Verification Report', 120, 55);
+
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(12);
-        return y;
-    },
+        doc.text(`Generated: ${formatDateTime(currentReport.generatedAt)}`, 120, 80);
+        doc.text(`Workbook: ${currentReport.fileName}`, 120, 98);
+    }
 
-    ensureSpace(doc, y, margin, required = 0) {
-        const pageHeight = doc.internal.pageSize.getHeight();
-        if (y + required > pageHeight - margin) {
-            doc.addPage();
+    function drawPdfSummary(doc, startY, pageWidth, summary) {
+        doc.setFontSize(14);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(35, 43, 97);
+        doc.text('Summary', 40, startY);
+
+        const cardWidth = (pageWidth - 120) / 2;
+        const cardHeight = 70;
+        const cardSpacing = 20;
+
+        const cards = [
+            { label: 'Total Sales', value: formatCurrency(summary.totalSales) },
+            { label: 'Discrepancies', value: integerFormatter.format(summary.discrepancyCount) },
+            { label: 'Total Bonus', value: formatCurrency(summary.totalBonus) },
+            { label: 'Max Variance', value: formatCurrency(summary.maxVariance) }
+        ];
+
+        let maxRowIndex = 0;
+
+        cards.forEach((card, index) => {
+            const rowIndex = Math.floor(index / 2);
+            const columnIndex = index % 2;
+            const cardX = 40 + columnIndex * (cardWidth + cardSpacing);
+            const cardY = startY + 20 + rowIndex * (cardHeight + cardSpacing);
+
+            doc.setFillColor(244, 248, 255);
+            doc.roundedRect(cardX, cardY, cardWidth, cardHeight, 12, 12, 'F');
+
+            doc.setTextColor(92, 105, 135);
+            doc.setFontSize(11);
+            doc.setFont('helvetica', 'normal');
+            doc.text(card.label, cardX + 16, cardY + 26);
+
+            doc.setTextColor(24, 34, 71);
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(16);
+            doc.text(card.value, cardX + 16, cardY + 48);
+
+            maxRowIndex = Math.max(maxRowIndex, rowIndex);
+        });
+
+        const summaryY = startY + 20 + (maxRowIndex + 1) * cardHeight + maxRowIndex * cardSpacing + 20;
+
+        doc.setFontSize(11);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(92, 105, 135);
+        const maxWidth = pageWidth - 80;
+        doc.text(`Average variance: ${formatCurrency(summary.averageVariance)} | Rows processed: ${summary.processedRows}/${summary.totalRows}`, 40, summaryY, { maxWidth });
+
+        if (summary.notice) {
+            doc.text(summary.notice, 40, summaryY + 16, { maxWidth });
+        }
+
+        return summaryY + 28;
+    }
+
+    function drawPdfStateTable(doc, startY, pageWidth, states) {
+        if (!Array.isArray(states) || states.length === 0) {
             doc.setFont('helvetica', 'normal');
             doc.setFontSize(12);
-            return margin;
+            doc.setTextColor(92, 105, 135);
+            doc.text('No state breakdown available for this workbook.', 40, startY);
+            return startY + 20;
         }
-        return y;
-    },
 
-    wrapText(doc, text, width) {
-        const value = text ?? '';
-        if (!width || width <= 0) {
-            return [String(value)];
-        }
-        return doc.splitTextToSize(String(value), width);
-    },
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(14);
+        doc.setTextColor(35, 43, 97);
+        doc.text('State Breakdown', 40, startY);
 
-    parseNumber(value) {
-        if (typeof value === 'number') {
-            return Number.isFinite(value) ? value : null;
-        }
-        if (typeof value === 'string') {
-            const cleaned = value.replace(/[^0-9.-]+/g, '');
-            if (!cleaned) return null;
-            const parsed = parseFloat(cleaned);
-            return Number.isFinite(parsed) ? parsed : null;
-        }
-        return null;
-    },
+        doc.autoTable({
+            startY: startY + 12,
+            head: [['State', 'Tier', 'Sales', 'Bonus', 'Variance Repeat', 'Variance New', 'Variance Incentive']],
+            body: states.map(state => [
+                state.state,
+                state.tier,
+                formatCurrency(state.totalSales),
+                formatCurrency(state.bonus),
+                formatVarianceValue(state.variance.repeat),
+                formatVarianceValue(state.variance.new),
+                formatVarianceValue(state.variance.incentive)
+            ]),
+            margin: { left: 40, right: 40 },
+            styles: {
+                fontSize: 10,
+                fillColor: [248, 250, 255],
+                textColor: [35, 43, 97]
+            },
+            headStyles: {
+                fillColor: [35, 43, 97],
+                textColor: [255, 255, 255],
+                fontStyle: 'bold'
+            },
+            alternateRowStyles: {
+                fillColor: [255, 255, 255]
+            }
+        });
 
-    parseInteger(value) {
-        if (typeof value === 'number') {
-            return Number.isFinite(value) ? Math.round(value) : null;
-        }
-        if (typeof value === 'string') {
-            const cleaned = value.replace(/[^0-9-]+/g, '');
-            if (!cleaned) return null;
-            const parsed = parseInt(cleaned, 10);
-            return Number.isNaN(parsed) ? null : parsed;
-        }
-        return null;
-    },
-
-    formatCount(value) {
-        const num = this.parseInteger(value);
-        return num === null ? '0' : num.toLocaleString('en-US');
-    },
-
-    formatCurrencyValue(value) {
-        const num = this.parseNumber(value);
-        return num === null ? 'N/A' : Utils.formatCurrency(num);
-    },
-
-    shouldHighlightDifference(value) {
-        const num = this.parseNumber(value);
-        return num !== null && Math.abs(num) > 0.01;
-    },
-
-    isErrorStatus(status) {
-        return typeof status === 'string' && status.toUpperCase().includes('ERROR');
-    },
-
-    formatCommissionType(type) {
-        if (!type) return 'Commission';
-        const normalised = type.replace(/_/g, ' ');
-        return normalised.replace(/\w\S*/g, word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
-    },
-
-    formatSheetReference(discrepancy) {
-        if (!discrepancy) return 'DETAIL!N/A';
-        const sheet = discrepancy.sheet_name || 'DETAIL';
-        const cell = discrepancy.cell_reference || 'N/A';
-        const rowNumber = this.parseInteger(discrepancy.row_number);
-        const rowLabel = rowNumber === null ? 'Row N/A' : `Row ${rowNumber}`;
-        return `${sheet}!${cell} (${rowLabel})`;
-    },
-
-    formatDateForFilename(date) {
-        const pad = (num) => String(num).padStart(2, '0');
-        return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}`;
+        return doc.lastAutoTable.finalY;
     }
-};
 
-// Time Display
-const TimeDisplay = {
-    init() {
-        this.updateTime();
-        setInterval(() => this.updateTime(), 1000);
-    },
+    function drawPdfDiscrepancies(doc, startY, discrepancies) {
+        const hasData = Array.isArray(discrepancies) && discrepancies.length > 0;
 
-    updateTime() {
-        const timeElement = document.getElementById('current-time');
-        if (timeElement) {
-            const now = new Date();
-            const timeString = now.toLocaleTimeString('en-US', { 
-                hour12: false,
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit'
-            });
-            timeElement.textContent = timeString;
+        if (!hasData) {
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(14);
+            doc.setTextColor(35, 43, 97);
+            doc.text('Discrepancy Log', 40, startY);
+
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(12);
+            doc.setTextColor(92, 105, 135);
+            doc.text('No discrepancies exceeded the ±$0.50 tolerance.', 40, startY + 18);
+            return startY + 30;
+        }
+
+        const rows = discrepancies.slice(0, 24).map(entry => [
+            String(entry.rowNumber),
+            entry.invoice,
+            entry.customer,
+            entry.state,
+            entry.type.toUpperCase(),
+            formatCurrency(entry.expected),
+            formatCurrency(entry.reported),
+            formatVarianceValue(entry.variance)
+        ]);
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(14);
+        doc.setTextColor(35, 43, 97);
+        doc.text('Discrepancy Log', 40, startY);
+
+        doc.autoTable({
+            startY: startY + 12,
+            head: [['Row', 'Invoice', 'Customer', 'State', 'Type', 'Expected', 'Reported', 'Variance']],
+            body: rows,
+            margin: { left: 40, right: 40 },
+            styles: {
+                fontSize: 10,
+                fillColor: [250, 252, 255],
+                textColor: [35, 43, 97]
+            },
+            headStyles: {
+                fillColor: [255, 110, 199],
+                textColor: [4, 11, 24],
+                fontStyle: 'bold'
+            },
+            alternateRowStyles: {
+                fillColor: [255, 255, 255]
+            }
+        });
+
+        if (discrepancies.length > rows.length) {
+            doc.setFont('helvetica', 'italic');
+            doc.setFontSize(10);
+            doc.setTextColor(92, 105, 135);
+            doc.text(`+${discrepancies.length - rows.length} additional variance entries available in CSV report.`, 40, doc.lastAutoTable.finalY + 16);
+            return doc.lastAutoTable.finalY + 30;
+        }
+
+        return doc.lastAutoTable.finalY;
+    }
+
+    function drawPdfFooter(doc, pageHeight) {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.setTextColor(120, 132, 170);
+        doc.text('Secure processing • No data retention • Thinkazoo Commission Verification Web App', 40, pageHeight - 30);
+    }
+
+    async function fetchLogo() {
+        if (cachedLogoDataUrl) {
+            return cachedLogoDataUrl;
+        }
+
+        const response = await fetch('dllogoonly.png');
+        if (!response.ok) {
+            throw new Error('Unable to load logo for PDF.');
+        }
+
+        const blob = await response.blob();
+        cachedLogoDataUrl = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = () => reject(new Error('Failed to encode logo for PDF.'));
+            reader.readAsDataURL(blob);
+        });
+
+        return cachedLogoDataUrl;
+    }
+
+    function renderResults(report) {
+        if (!report?.summary) {
+            return;
+        }
+
+        resultsPanel.classList.remove('is-hidden');
+        csvButton.disabled = false;
+        pdfButton.disabled = false;
+
+        const { summary } = report;
+        summaryFields.totalSales.textContent = formatCurrency(summary.totalSales);
+        summaryFields.discrepancyCount.textContent = integerFormatter.format(summary.discrepancyCount);
+        summaryFields.totalBonus.textContent = formatCurrency(summary.totalBonus);
+        summaryFields.averageVariance.textContent = formatCurrency(summary.averageVariance);
+
+        const metaParts = [];
+        if (summary.notice) {
+            metaParts.push(summary.notice);
+        }
+        metaParts.push(`Processed ${summary.processedRows} of ${summary.totalRows} rows.`);
+        metaParts.push(`Generated ${formatDateTime(report.generatedAt)}.`);
+        resultsMeta.textContent = metaParts.join(' ');
+
+        renderStateTable(report.stateBreakdown);
+        renderDiscrepancies(report.discrepancies);
+        renderDetailPreview(report.rows);
+    }
+
+    function renderStateTable(states) {
+        stateTableBody.innerHTML = '';
+
+        if (!Array.isArray(states) || states.length === 0) {
+            const row = document.createElement('tr');
+            const cell = document.createElement('td');
+            cell.colSpan = 7;
+            cell.textContent = 'No state data available.';
+            row.appendChild(cell);
+            stateTableBody.appendChild(row);
+            return;
+        }
+
+        states.forEach(state => {
+            const row = document.createElement('tr');
+            row.appendChild(createCell(state.state));
+            row.appendChild(createCell(state.tier));
+            row.appendChild(createCell(formatCurrency(state.totalSales)));
+            row.appendChild(createCell(formatCurrency(state.bonus)));
+            row.appendChild(createVarianceCell(state.variance.repeat));
+            row.appendChild(createVarianceCell(state.variance.new));
+            row.appendChild(createVarianceCell(state.variance.incentive));
+            stateTableBody.appendChild(row);
+        });
+    }
+
+    function renderDiscrepancies(discrepancies) {
+        discrepancyTableBody.innerHTML = '';
+
+        if (!Array.isArray(discrepancies) || discrepancies.length === 0) {
+            discrepancyHint.textContent = 'No discrepancies detected within the ±$0.50 tolerance.';
+            const row = document.createElement('tr');
+            const cell = document.createElement('td');
+            cell.colSpan = 8;
+            cell.textContent = 'All reported commissions matched the calculated expectations within tolerance.';
+            row.appendChild(cell);
+            discrepancyTableBody.appendChild(row);
+            return;
+        }
+
+        const topEntry = discrepancies[0];
+        discrepancyHint.textContent = `Identified ${discrepancies.length} variance entries. Highest variance is ${formatVarianceValue(topEntry.variance)} on invoice ${topEntry.invoice}.`;
+
+        discrepancies.slice(0, 40).forEach(entry => {
+            const row = document.createElement('tr');
+            row.appendChild(createCell(entry.rowNumber));
+            row.appendChild(createCell(entry.invoice));
+            row.appendChild(createCell(entry.customer));
+            row.appendChild(createCell(entry.state));
+            row.appendChild(createCell(entry.type.toUpperCase()));
+            row.appendChild(createCell(formatCurrency(entry.expected)));
+            row.appendChild(createCell(formatCurrency(entry.reported)));
+            row.appendChild(createVarianceCell(entry.variance));
+            discrepancyTableBody.appendChild(row);
+        });
+
+        if (discrepancies.length > 40) {
+            const row = document.createElement('tr');
+            const cell = document.createElement('td');
+            cell.colSpan = 8;
+            cell.textContent = `+${discrepancies.length - 40} additional discrepancies available in exported reports.`;
+            row.appendChild(cell);
+            discrepancyTableBody.appendChild(row);
         }
     }
-};
 
-// Application Initialization
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('Commission Verifier initializing...');
-    
-    // Initialize all managers
-    FileUploadManager.init();
-    CollapsibleManager.init();
-    ReportGenerator.init();
-    TimeDisplay.init();
-    
-    // Set up verify button handler
-    const verifyBtn = document.getElementById('verify-btn');
-    if (verifyBtn) {
-        verifyBtn.addEventListener('click', () => CommissionVerifier.verify());
+    function renderDetailPreview(rows) {
+        detailTableBody.innerHTML = '';
+
+        const previewRows = Array.isArray(rows) ? rows.slice(0, PREVIEW_LIMIT) : [];
+        previewMeta.textContent = `Previewing the first ${previewRows.length} of ${rows?.length || 0} rows.`;
+
+        if (previewRows.length === 0) {
+            const row = document.createElement('tr');
+            const cell = document.createElement('td');
+            cell.colSpan = 9;
+            cell.textContent = 'No detail rows to display.';
+            row.appendChild(cell);
+            detailTableBody.appendChild(row);
+            return;
+        }
+
+        previewRows.forEach(entry => {
+            const row = document.createElement('tr');
+            row.appendChild(createCell(entry.rowNumber));
+            row.appendChild(createCell(entry.invoice));
+            row.appendChild(createCell(entry.customer));
+            row.appendChild(createCell(entry.state));
+            row.appendChild(createCell(entry.tier));
+            row.appendChild(createCell(formatCurrency(entry.sales)));
+            row.appendChild(createVarianceCell(entry.variance.repeat));
+            row.appendChild(createVarianceCell(entry.variance.new));
+            row.appendChild(createVarianceCell(entry.variance.incentive));
+            detailTableBody.appendChild(row);
+        });
+
+        if ((rows?.length || 0) > PREVIEW_LIMIT) {
+            const row = document.createElement('tr');
+            const cell = document.createElement('td');
+            cell.colSpan = 9;
+            cell.textContent = `+${rows.length - PREVIEW_LIMIT} additional rows available via CSV or PDF reports.`;
+            row.appendChild(cell);
+            detailTableBody.appendChild(row);
+        }
     }
-    
-    console.log('Commission Verifier ready');
-});
 
+    function setUploadButtonLoading(isLoading) {
+        uploadButton.classList.toggle('is-loading', isLoading);
+        uploadButton.disabled = isLoading;
+    }
+
+    function setFileMeta(message, status) {
+        fileMeta.textContent = message;
+        fileMeta.classList.remove('is-error', 'is-success');
+        if (status === 'error') {
+            fileMeta.classList.add('is-error');
+        } else if (status === 'success') {
+            fileMeta.classList.add('is-success');
+        }
+    }
+
+    function createCell(value) {
+        const cell = document.createElement('td');
+        cell.textContent = value === null || value === undefined ? '' : String(value);
+        return cell;
+    }
+
+    function createVarianceCell(value) {
+        const cell = document.createElement('td');
+        const amount = Number(value) || 0;
+        cell.textContent = formatVarianceValue(amount);
+        if (amount > 0) {
+            cell.classList.add('variance-positive');
+        } else if (amount < 0) {
+            cell.classList.add('variance-negative');
+        }
+        return cell;
+    }
+
+    function formatCurrency(value) {
+        return currencyFormatter.format(Number(value) || 0);
+    }
+
+    function formatVarianceValue(value) {
+        const amount = Number(value) || 0;
+        if (amount === 0) {
+            return currencyFormatter.format(0);
+        }
+        const absolute = currencyFormatter.format(Math.abs(amount));
+        return amount > 0 ? `+${absolute}` : `-${absolute}`;
+    }
+
+    function formatBytes(bytes) {
+        if (!Number.isFinite(bytes)) {
+            return '0 B';
+        }
+        const units = ['B', 'KB', 'MB', 'GB'];
+        let value = bytes;
+        let index = 0;
+        while (value >= 1024 && index < units.length - 1) {
+            value /= 1024;
+            index += 1;
+        }
+        const decimals = value >= 10 || index === 0 ? 0 : 1;
+        return `${value.toFixed(decimals)} ${units[index]}`;
+    }
+
+    function formatDateTime(dateLike) {
+        try {
+            return dateTimeFormatter.format(new Date(dateLike));
+        } catch (error) {
+            return String(dateLike || '');
+        }
+    }
+
+    function formatTimestamp(date) {
+        const target = date instanceof Date ? date : new Date(date);
+        const pad = value => String(value).padStart(2, '0');
+        return `${target.getFullYear()}${pad(target.getMonth() + 1)}${pad(target.getDate())}-${pad(target.getHours())}${pad(target.getMinutes())}`;
+    }
+
+    async function tryParseJson(response) {
+        try {
+            return await response.clone().json();
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function announce(message) {
+        if (announcer) {
+            announcer.textContent = message;
+        }
+    }
+
+    init();
+})();
