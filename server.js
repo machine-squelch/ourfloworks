@@ -384,7 +384,7 @@ app.get('/api/commission/report/:file', (req, res) => {
   res.download(filePath);
 });
 
-app.get('/healthz', (_req, res) => {
+app.get(['/healthz', '/health'], (_req, res) => {
   res.json({ ok: true });
 });
 
