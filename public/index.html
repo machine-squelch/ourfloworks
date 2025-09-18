@@ -278,7 +278,7 @@
                         </span>
                     </button>
                     <div id="verify-description" class="button-description">
-                        Upload a CSV file to enable verification
+                        Upload an Excel file to enable verification
                     </div>
                 </div>
             </section>
@@ -491,16 +491,23 @@
         
         // Show Turnstile when file is uploaded
         document.addEventListener('DOMContentLoaded', function() {
-            const fileInput = document.getElementById('csv-file');
+            const fileInput = document.getElementById('file-input');
             const turnstileContainer = document.getElementById('turnstile-container');
             const securityNotice = document.getElementById('security-notice');
-            
+
+            if (!fileInput) {
+                console.warn('Turnstile initialization skipped: file input element not found.');
+                return;
+            }
+
             fileInput.addEventListener('change', function() {
-                if (this.files.length > 0) {
-                    // Show Turnstile when file is selected
-                    turnstileContainer.style.display = 'flex';
-                    securityNotice.style.display = 'block';
+                if (!turnstileContainer || !securityNotice) {
+                    return;
                 }
+
+                const shouldShowTurnstile = this.files.length > 0;
+                turnstileContainer.style.display = shouldShowTurnstile ? 'flex' : 'none';
+                securityNotice.style.display = shouldShowTurnstile ? 'block' : 'none';
             });
         });
     </script>
