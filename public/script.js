@@ -250,13 +250,24 @@ const ProgressManager = {
 const ResultsManager = {
     show(results) {
         console.log('Received results:', results);
-        AppState.results = results;
-        ReportGenerator.enable(results);
 
-        this.updateSummaryCards(results);
-        this.updateCommissionBreakdown(results);
-        this.updateStateAnalysis(results.state_analysis);
-        this.updateDiscrepancies(results.discrepancies);
+        const firstEntry = results?.perFile?.[0];
+        if (!firstEntry) {
+            console.warn('No per-file results available to display');
+            return;
+        }
+
+        const { result, comparison } = firstEntry;
+        const states = Array.isArray(result?.states) ? result.states : [];
+        const grandTotals = result?.grand || { totalSales: 0, commission: 0, stateBonus: 0, totalWithBonus: 0 };
+
+        AppState.results = firstEntry;
+        ReportGenerator.enable(firstEntry);
+
+        this.updateSummaryCards(grandTotals, comparison);
+        this.updateCommissionBreakdown(states, grandTotals);
+        this.updateStateAnalysis(states, comparison);
+        this.updateDiscrepancies(comparison);
         
         const section = document.getElementById('results-section');
         if (section) {
@@ -267,87 +278,179 @@ const ResultsManager = {
         Utils.announce('Verification results are now available');
     },
 
-    updateSummaryCards(results) {
-        // Calculate total transactions from state analysis
-        const totalTransactions = results.state_analysis ? 
-            results.state_analysis.reduce((sum, state) => sum + parseInt(state.transactions || 0), 0) : 0;
-        
-        const totalStates = results.state_analysis ? results.state_analysis.length : 0;
-        
-        const elements = {
-            'total-transactions': totalTransactions,
-            'total-states': totalStates,
-            'calculated-commission': Utils.formatCurrency(parseFloat(results.summary?.my_calculated_total || 0))
-        };
+    updateSummaryCards(grandTotals, comparison) {
+        const summaryEntries = Array.isArray(comparison) ? comparison : [];
 
-        Object.entries(elements).forEach(([id, value]) => {
-            const element = document.getElementById(id);
-            if (element) element.textContent = value;
+        const previouslyCalculated = summaryEntries.reduce((sum, entry) => {
+            if (!entry?.summaryFound) return sum;
+            const value = Number(entry.summaryTotal);
+            return sum + (Number.isFinite(value) ? value : 0);
+        }, 0);
+
+        const correctedTotal = Number(grandTotals?.totalWithBonus) || 0;
+        const moneyOwed = correctedTotal - previouslyCalculated;
+
+        const impactedStates = summaryEntries.reduce((count, entry) => {
+            if (!entry?.summaryFound) return count;
+            const delta = Number(entry.delta);
+            if (Number.isFinite(delta) && Math.abs(delta) > 0.01) {
+                return count + 1;
+            }
+            return count;
+        }, 0);
+
+        const cardConfigurations = [
+            {
+                id: 'total-transactions',
+                label: 'Previously calculated commission',
+                value: Utils.formatCurrency(previouslyCalculated)
+            },
+            {
+                id: 'total-states',
+                label: 'New – corrected commission',
+                value: Utils.formatCurrency(correctedTotal)
+            },
+            {
+                id: 'calculated-commission',
+                label: 'Money owed',
+                value: Utils.formatCurrency(moneyOwed),
+                emphasize: Math.abs(moneyOwed) > 0.01
+            },
+            {
+                id: 'verification-status',
+                label: 'States impacted',
+                value: impactedStates.toLocaleString('en-US')
+            }
+        ];
+
+        cardConfigurations.forEach(({ id, label, value, emphasize }) => {
+            const valueElement = document.getElementById(id);
+            if (!valueElement) return;
+
+            valueElement.textContent = value;
+            const labelElement = valueElement.parentElement?.querySelector('.card-label');
+            if (labelElement) {
+                labelElement.textContent = label;
+            }
+
+            if (id === 'calculated-commission') {
+                valueElement.classList.toggle('status-error', Boolean(emphasize));
+            } else {
+                valueElement.classList.remove('status-error');
+            }
         });
-
-        const statusElement = document.getElementById('verification-status');
-        if (statusElement) {
-            const rawStatus = results.summary?.percentage_status ?? 'Complete';
-            const statusText = typeof rawStatus === 'string' ? rawStatus : String(rawStatus);
-            statusElement.textContent = statusText;
-            statusElement.classList.toggle('status-error', statusText.toUpperCase().includes('ERROR'));
-        }
     },
 
-    updateCommissionBreakdown(results) {
-        // Calculate breakdown from state analysis
-        let repeatCommission = 0;
-        let newProductCommission = 0;
-        let incentiveCommission = 0;
-        let stateBonuses = 0;
-        
-        if (results.state_analysis) {
-            results.state_analysis.forEach(state => {
-                stateBonuses += parseFloat(state.bonus || 0);
+    updateCommissionBreakdown(states, grandTotals) {
+        const breakdown = {
+            repeat: 0,
+            new: 0,
+            incentive: 0
+        };
+
+        (Array.isArray(states) ? states : []).forEach(state => {
+            (Array.isArray(state?.lines) ? state.lines : []).forEach(line => {
+                const commission = Number(line?.commission) || 0;
+                if (!Number.isFinite(commission) || commission === 0) return;
+
+                if (line.isIncentivized) {
+                    breakdown.incentive += commission;
+                } else if (String(line.purchaseType).toLowerCase() === 'new') {
+                    breakdown.new += commission;
+                } else {
+                    breakdown.repeat += commission;
+                }
             });
-        }
-        
-        // Use summary data for commission totals
-        const totalCommission = parseFloat(results.summary?.my_calculated_commission || 0);
-        const totalBonuses = parseFloat(results.summary?.my_calculated_bonuses || 0);
-        
+        });
+
         const elements = {
-            'repeat-commission': Utils.formatCurrency(totalCommission * 0.4), // Approximate split
-            'new-commission': Utils.formatCurrency(totalCommission * 0.6), // Approximate split
-            'incentive-commission': Utils.formatCurrency(0), // Not separately tracked
-            'state-bonuses': Utils.formatCurrency(totalBonuses)
+            'repeat-commission': Utils.formatCurrency(breakdown.repeat),
+            'new-commission': Utils.formatCurrency(breakdown.new),
+            'incentive-commission': Utils.formatCurrency(breakdown.incentive),
+            'state-bonuses': Utils.formatCurrency(Number(grandTotals?.stateBonus) || 0)
         };
 
         Object.entries(elements).forEach(([id, value]) => {
             const element = document.getElementById(id);
-            if (element) element.textContent = value;
+            if (element) {
+                element.textContent = value;
+            }
         });
     },
 
-    updateStateAnalysis(stateAnalysis) {
-        if (!stateAnalysis || !Array.isArray(stateAnalysis)) return;
+    updateStateAnalysis(states, comparison) {
+        const table = document.getElementById('state-table');
+        const tableBody = table?.querySelector('tbody');
+        if (!table || !tableBody) return;
 
-        const tableBody = document.querySelector('#state-table tbody');
-        if (!tableBody) return;
-        
-        // Clear existing rows
+        const headerRow = table.querySelector('thead tr');
+        if (headerRow) {
+            headerRow.innerHTML = `
+                <th>State</th>
+                <th>Previously Calculated Commission</th>
+                <th>New – Corrected Commission</th>
+                <th>Money Owed</th>
+            `;
+        }
+
         tableBody.innerHTML = '';
-        
-        // Add state data rows
-        stateAnalysis.forEach(state => {
+
+        const comparisonMap = new Map();
+        (Array.isArray(comparison) ? comparison : []).forEach(entry => {
+            if (entry?.state) {
+                comparisonMap.set(entry.state, entry);
+            }
+        });
+
+        const sortedStates = (Array.isArray(states) ? states.slice() : []).sort((a, b) => {
+            const nameA = String(a?.state || '').toUpperCase();
+            const nameB = String(b?.state || '').toUpperCase();
+            return nameA.localeCompare(nameB);
+        });
+
+        sortedStates.forEach(state => {
+            const comparisonEntry = comparisonMap.get(state.state) || {};
+            const previous = comparisonEntry.summaryFound ? Number(comparisonEntry.summaryTotal) : null;
+            const corrected = Number(state?.totalWithBonus) || 0;
+            let moneyOwed = Number(comparisonEntry.delta);
+
+            if (!Number.isFinite(moneyOwed)) {
+                if (previous != null && Number.isFinite(previous)) {
+                    moneyOwed = corrected - previous;
+                } else {
+                    moneyOwed = corrected;
+                }
+            }
+
+            const previousDisplay = previous != null && Number.isFinite(previous)
+                ? Utils.formatCurrency(previous)
+                : '—';
+
+            const correctedDisplay = Utils.formatCurrency(corrected);
+            const differenceDisplay = Utils.formatCurrency(moneyOwed);
+            const differenceClass = moneyOwed > 0.01 ? 'positive' : moneyOwed < -0.01 ? 'negative' : 'neutral';
+
+            const transactions = Array.isArray(state?.lines) ? state.lines.length : 0;
+            const totalSales = Number(state?.totalSales) || 0;
+
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td>${state.state || 'N/A'}</td>
-                <td>${Utils.formatCurrency(parseFloat(state.total_sales || 0))}</td>
-                <td>${state.tier || 'N/A'}</td>
-                <td>${Utils.formatCurrency(parseFloat(state.my_calculated_commission || 0))}</td>
-                <td>${Utils.formatCurrency(parseFloat(state.bonus || 0))}</td>
-                <td>${state.transactions || 0}</td>
+                <td title="${transactions} transactions • ${Utils.formatCurrency(totalSales)} in sales">${state.state || 'N/A'}</td>
+                <td>${previousDisplay}</td>
+                <td>${correctedDisplay}</td>
+                <td class="${differenceClass}">${differenceDisplay}</td>
             `;
             tableBody.appendChild(row);
         });
 
-        // Show the state analysis section
+        if (!sortedStates.length) {
+            const emptyRow = document.createElement('tr');
+            emptyRow.innerHTML = `
+                <td colspan="4" style="text-align: center;">No state data available</td>
+            `;
+            tableBody.appendChild(emptyRow);
+        }
+
         if (!CollapsibleManager.expandSection('state-header')) {
             const stateSection = document.getElementById('state-content');
             if (stateSection) {
@@ -355,7 +458,6 @@ const ResultsManager = {
                 stateSection.style.maxHeight = `${stateSection.scrollHeight}px`;
                 stateSection.setAttribute('aria-hidden', 'false');
             }
-            // Ensure section appears expanded for screen readers and keyboard users
             const stateHeader = document.getElementById('state-header');
             if (stateHeader) {
                 stateHeader.setAttribute('aria-expanded', 'true');
@@ -363,51 +465,81 @@ const ResultsManager = {
         }
     },
 
-    updateDiscrepancies(discrepancies) {
-        if (!discrepancies || !Array.isArray(discrepancies)) {
-            discrepancies = [];
+    updateDiscrepancies(comparison) {
+        const entries = Array.isArray(comparison) ? comparison : [];
+        const table = document.getElementById('discrepancies-table');
+        const tableBody = table?.querySelector('tbody');
+        if (!table || !tableBody) return;
+
+        const headerRow = table.querySelector('thead tr');
+        if (headerRow) {
+            headerRow.innerHTML = `
+                <th>State</th>
+                <th>Previously Calculated</th>
+                <th>New – Corrected</th>
+                <th>Money Owed</th>
+                <th>Status</th>
+            `;
         }
-        
-        // Update discrepancy count
+
+        const discrepancies = entries.filter(entry => {
+            const corrected = Number(entry?.ourTotalWithBonus) || 0;
+            if (!entry?.summaryFound) {
+                return corrected !== 0;
+            }
+            const previous = Number(entry.summaryTotal) || 0;
+            const delta = Number(entry.delta);
+            const difference = Number.isFinite(delta) ? delta : corrected - previous;
+            return Math.abs(difference) > 0.01;
+        });
+
         const countElement = document.getElementById('discrepancy-count');
         if (countElement) {
             countElement.textContent = discrepancies.length;
         }
-        
-        const tableBody = document.querySelector('#discrepancies-table tbody');
-        if (!tableBody) return;
-        
-        // Clear existing rows
+
         tableBody.innerHTML = '';
-        
-        if (discrepancies.length === 0) {
-            // Show "no discrepancies" message
+
+        if (!discrepancies.length) {
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td colspan="5" style="text-align: center; color: #4CAF50; font-weight: bold;">
-                    ✅ No discrepancies found - all calculations are accurate!
+                    ✅ No discrepancies found — reported and corrected totals align.
                 </td>
             `;
             tableBody.appendChild(row);
         } else {
-            // Add discrepancy rows
-            discrepancies.forEach(discrepancy => {
+            discrepancies.forEach(entry => {
+                const corrected = Number(entry?.ourTotalWithBonus) || 0;
+                const previous = entry?.summaryFound ? Number(entry.summaryTotal) || 0 : null;
+                const rawDelta = Number(entry?.delta);
+                let difference = Number.isFinite(rawDelta) ? rawDelta : null;
+
+                if (difference == null) {
+                    if (previous != null && Number.isFinite(previous)) {
+                        difference = corrected - previous;
+                    } else {
+                        difference = corrected;
+                    }
+                }
+
+                const differenceClass = difference > 0.01 ? 'positive' : difference < -0.01 ? 'negative' : 'neutral';
+                const statusText = entry?.summaryFound
+                    ? (Math.abs(difference) > 0.01 ? 'Variance detected' : 'Aligned')
+                    : 'No summary data';
+
                 const row = document.createElement('tr');
-                const difference = parseFloat(discrepancy.difference || 0);
-                const differenceClass = difference > 0 ? 'positive' : difference < 0 ? 'negative' : 'neutral';
-                
                 row.innerHTML = `
-                    <td>${discrepancy.invoice || 'N/A'}</td>
-                    <td>${discrepancy.customer || 'N/A'}</td>
-                    <td>${Utils.formatCurrency(parseFloat(discrepancy.my_calculated || 0))}</td>
-                    <td>${Utils.formatCurrency(parseFloat(discrepancy.detail_reported || 0))}</td>
+                    <td>${entry?.state || 'N/A'}</td>
+                    <td>${previous != null && Number.isFinite(previous) ? Utils.formatCurrency(previous) : '—'}</td>
+                    <td>${Utils.formatCurrency(corrected)}</td>
                     <td class="${differenceClass}">${Utils.formatCurrency(difference)}</td>
+                    <td>${statusText}</td>
                 `;
                 tableBody.appendChild(row);
             });
         }
 
-        // Show the discrepancies section
         if (!CollapsibleManager.expandSection('discrepancies-header')) {
             const discrepanciesSection = document.getElementById('discrepancies-content');
             if (discrepanciesSection) {
@@ -719,9 +851,12 @@ const ReportGenerator = {
     },
 
     async download(results) {
-        if (!results) {
+        const entry = results || this.lastResults || AppState.results;
+        if (!entry) {
             throw new Error('No verification results available for report generation');
         }
+
+        const { result, comparison, file } = entry;
 
         const jsPDFConstructor = await this.ensureLibrary();
         const doc = new jsPDFConstructor({
@@ -792,10 +927,11 @@ const ReportGenerator = {
 
         let y = headerHeight + 28;
 
+        const discrepanciesCount = this.countDiscrepancies(comparison);
         const headerLines = [
             `Generated: ${new Date().toLocaleString()}`,
-            AppState.currentFile ? `Source File: ${AppState.currentFile.name}` : null,
-            `Discrepancies Identified: ${(Array.isArray(results.discrepancies) ? results.discrepancies.length : 0).toLocaleString('en-US')}`
+            file ? `Report Source: ${file}` : (AppState.currentFile ? `Source File: ${AppState.currentFile.name}` : null),
+            `States with variances: ${discrepanciesCount.toLocaleString('en-US')}`
         ].filter(Boolean);
 
         if (headerLines.length) {
@@ -827,9 +963,9 @@ const ReportGenerator = {
             y = infoTop + infoHeight + 20;
         }
 
-        y = this.addSummary(doc, results, margin, contentWidth, y);
-        y = this.addStateHighlights(doc, results, margin, contentWidth, y);
-        y = this.addDiscrepancies(doc, results, margin, contentWidth, y);
+        y = this.addSummary(doc, entry, margin, contentWidth, y);
+        y = this.addStateHighlights(doc, entry, margin, contentWidth, y);
+        y = this.addDiscrepancies(doc, entry, margin, contentWidth, y);
 
         doc.save(`commission-report-${this.formatDateForFilename(new Date())}.pdf`);
         Utils.announce('Detailed PDF report downloaded');
@@ -926,30 +1062,58 @@ const ReportGenerator = {
         return this.logoPromise;
     },
 
-    addSummary(doc, results, margin, width, y) {
+    countDiscrepancies(comparison) {
+        const entries = Array.isArray(comparison) ? comparison : [];
+        return entries.reduce((count, entry) => {
+            const corrected = Number(entry?.ourTotalWithBonus) || 0;
+            if (!entry?.summaryFound) {
+                return corrected !== 0 ? count + 1 : count;
+            }
+
+            const previous = Number(entry.summaryTotal) || 0;
+            const delta = Number(entry.delta);
+            const difference = Number.isFinite(delta) ? delta : corrected - previous;
+            return Math.abs(difference) > 0.01 ? count + 1 : count;
+        }, 0);
+    },
+
+    addSummary(doc, entry, margin, width, y) {
         y = this.addSectionTitle(doc, 'Summary', margin, y);
 
-        const summary = results.summary || {};
-        const totalTransactions = Array.isArray(results.state_analysis)
-            ? results.state_analysis.reduce((sum, state) => sum + (this.parseInteger(state.transactions) ?? 0), 0)
-            : 0;
-        const totalStates = Array.isArray(results.state_analysis) ? results.state_analysis.length : 0;
-        const discrepancyCount = typeof summary.total_discrepancies === 'number'
-            ? summary.total_discrepancies
-            : (Array.isArray(results.discrepancies) ? results.discrepancies.length : 0);
+        const result = entry?.result || {};
+        const comparison = Array.isArray(entry?.comparison) ? entry.comparison : [];
+        const states = Array.isArray(result?.states) ? result.states : [];
+
+        const totalTransactions = states.reduce((sum, state) => {
+            const count = Array.isArray(state?.lines) ? state.lines.length : 0;
+            return sum + count;
+        }, 0);
+
+        const totalStates = states.length;
+
+        const previouslyCalculated = comparison.reduce((sum, item) => {
+            if (!item?.summaryFound) return sum;
+            const value = Number(item.summaryTotal);
+            return sum + (Number.isFinite(value) ? value : 0);
+        }, 0);
+
+        const correctedTotal = Number(result?.grand?.totalWithBonus) || 0;
+        const totalSales = Number(result?.grand?.totalSales) || 0;
+        const bonuses = Number(result?.grand?.stateBonus) || 0;
+        const moneyOwed = correctedTotal - previouslyCalculated;
+        const impactedStates = this.countDiscrepancies(comparison);
+        const missingSummary = comparison.filter(item => !item?.summaryFound).length;
 
         const summaryItems = [
-            { label: 'Total Transactions Reviewed', value: totalTransactions.toLocaleString('en-US') },
+            { label: 'Total Sales Reviewed', value: this.formatCurrencyValue(totalSales) },
             { label: 'States Included', value: totalStates.toLocaleString('en-US') },
-            { label: 'Calculated Commission', value: this.formatCurrencyValue(summary.my_calculated_commission) },
-            { label: 'Calculated Bonuses', value: this.formatCurrencyValue(summary.my_calculated_bonuses) },
-            { label: 'Calculated Total', value: this.formatCurrencyValue(summary.my_calculated_total) },
-            { label: 'Reported Detail Total', value: this.formatCurrencyValue(summary.detail_reported_total) },
-            { label: 'Actual Payment (Summary)', value: this.formatCurrencyValue(summary.actual_payment) },
-            { label: 'Payment Difference vs Actual', value: this.formatCurrencyValue(summary.payment_difference), color: this.shouldHighlightDifference(summary.payment_difference) ? 'error' : 'default' },
-            { label: 'Payment Status', value: summary.payment_status || 'Unknown', color: summary.payment_status && summary.payment_status !== 'CORRECT' ? 'error' : 'default' },
-            { label: 'Verification Status', value: summary.percentage_status || 'Complete', color: this.isErrorStatus(summary.percentage_status) ? 'error' : 'default' },
-            { label: 'Discrepancies Found', value: discrepancyCount.toLocaleString('en-US'), color: discrepancyCount > 0 ? 'error' : 'default' }
+            { label: 'Transactions Reviewed', value: totalTransactions.toLocaleString('en-US') },
+            { label: 'Previously Calculated Commission', value: this.formatCurrencyValue(previouslyCalculated) },
+            { label: 'New – Corrected Commission', value: this.formatCurrencyValue(correctedTotal) },
+            { label: 'State Bonuses Included', value: this.formatCurrencyValue(bonuses) },
+            { label: 'Money Owed', value: this.formatCurrencyValue(moneyOwed), color: Math.abs(moneyOwed) > 0.01 ? 'error' : 'default' },
+            { label: 'States Impacted', value: impactedStates.toLocaleString('en-US'), color: impactedStates > 0 ? 'error' : 'default' },
+            { label: 'States Missing Summary Data', value: missingSummary.toLocaleString('en-US') }
         ];
 
         const labelWidth = Math.min(240, width * 0.45);
@@ -991,18 +1155,44 @@ const ReportGenerator = {
         return y;
     },
 
-    addStateHighlights(doc, results, margin, width, y) {
-        const states = Array.isArray(results.state_analysis) ? results.state_analysis : [];
+    addStateHighlights(doc, entry, margin, width, y) {
+        const result = entry?.result || {};
+        const comparisonEntries = Array.isArray(entry?.comparison) ? entry.comparison : [];
+        const states = Array.isArray(result?.states) ? result.states : [];
         if (!states.length) {
             return y;
         }
 
+        const comparisonMap = new Map();
+        comparisonEntries.forEach(item => {
+            if (item?.state) {
+                comparisonMap.set(item.state, item);
+            }
+        });
+
         const topStates = states
-            .map(state => ({
-                data: state,
-                difference: this.parseNumber(state.commission_difference) ?? 0,
-                discrepancies: this.parseInteger(state.discrepancies_count) ?? 0
-            }))
+            .map(state => {
+                const comparison = comparisonMap.get(state.state) || {};
+                const previous = comparison.summaryFound ? Number(comparison.summaryTotal) : null;
+                const corrected = Number(state?.totalWithBonus) || 0;
+                let difference = Number(comparison.delta);
+                if (!Number.isFinite(difference)) {
+                    if (previous != null && Number.isFinite(previous)) {
+                        difference = corrected - previous;
+                    } else {
+                        difference = corrected;
+                    }
+                }
+
+                return {
+                    state,
+                    previous,
+                    corrected,
+                    difference,
+                    summaryFound: Boolean(comparison.summaryFound),
+                    transactions: Array.isArray(state?.lines) ? state.lines.length : 0
+                };
+            })
             .sort((a, b) => Math.abs(b.difference) - Math.abs(a.difference))
             .slice(0, Math.min(5, states.length));
 
@@ -1015,7 +1205,7 @@ const ReportGenerator = {
         y = this.addSectionTitle(doc, 'State Highlights', margin, y);
         doc.setFont('helvetica', 'italic');
         doc.setTextColor(muted[0], muted[1], muted[2]);
-        doc.text('Top states ranked by commission variance', margin, y);
+        doc.text('Top states ranked by money owed variance', margin, y);
         y += this.lineHeight + 6;
         doc.setFont('helvetica', 'normal');
         doc.setTextColor(text[0], text[1], text[2]);
@@ -1023,15 +1213,26 @@ const ReportGenerator = {
         const blockPadding = 10;
 
         topStates.forEach(entry => {
-            const state = entry.data;
-            const header = `${state.state || 'N/A'} — ${this.formatCurrencyValue(state.total_sales)} in Sales`;
+            const { state, previous, corrected, difference, summaryFound, transactions } = entry;
+            const header = `${state.state || 'N/A'} — ${this.formatCurrencyValue(state.totalSales)} in sales`;
             const headerLines = this.wrapText(doc, header, width);
             const detailEntries = [
-                { text: `Tier ${state.tier || 'N/A'} • Transactions: ${this.formatCount(state.transactions)}`, color: 'default' },
-                { text: `Calculated vs Reported: ${this.formatCurrencyValue(state.my_calculated_commission)} vs ${this.formatCurrencyValue(state.detail_reported_commission)}`, color: 'default' },
-                { text: `Bonuses: ${this.formatCurrencyValue(state.bonus)}`, color: 'default' },
-                { text: `Commission Difference: ${this.formatCurrencyValue(state.commission_difference)}`, color: Math.abs(entry.difference) > 0.01 ? 'error' : 'default' },
-                { text: `Discrepancies Logged: ${this.formatCount(state.discrepancies_count)}`, color: entry.discrepancies > 0 ? 'error' : 'default' }
+                {
+                    text: `Previously Calculated: ${previous != null && Number.isFinite(previous) ? this.formatCurrencyValue(previous) : 'Not provided'}`,
+                    color: summaryFound && previous != null && Number.isFinite(previous) ? 'default' : 'error'
+                },
+                {
+                    text: `New – Corrected: ${this.formatCurrencyValue(corrected)}`,
+                    color: 'default'
+                },
+                {
+                    text: `Money Owed: ${this.formatCurrencyValue(difference)}`,
+                    color: Math.abs(difference) > 0.01 ? 'error' : 'default'
+                },
+                {
+                    text: `Transactions Reviewed: ${transactions.toLocaleString('en-US')}`,
+                    color: 'default'
+                }
             ];
 
             detailEntries.forEach(item => {
@@ -1080,14 +1281,44 @@ const ReportGenerator = {
         return y;
     },
 
-    addDiscrepancies(doc, results, margin, width, y) {
-        const discrepancies = Array.isArray(results.discrepancies) ? results.discrepancies : [];
+    addDiscrepancies(doc, entry, margin, width, y) {
+        const comparisonEntries = Array.isArray(entry?.comparison) ? entry.comparison : [];
         const { primary, secondary, accent, text, muted, error } = this.theme;
+
+        const discrepancies = comparisonEntries
+            .map(item => {
+                const corrected = Number(item?.ourTotalWithBonus) || 0;
+                const previous = item?.summaryFound ? Number(item.summaryTotal) || 0 : null;
+                const rawDelta = Number(item?.delta);
+                let difference = Number.isFinite(rawDelta) ? rawDelta : null;
+                if (difference == null) {
+                    if (previous != null && Number.isFinite(previous)) {
+                        difference = corrected - previous;
+                    } else {
+                        difference = corrected;
+                    }
+                }
+
+                return {
+                    state: item?.state || 'Unknown',
+                    previous,
+                    corrected,
+                    difference,
+                    summaryFound: Boolean(item?.summaryFound)
+                };
+            })
+            .filter(entry => {
+                if (!entry.summaryFound) {
+                    return entry.corrected !== 0;
+                }
+                return Math.abs(entry.difference) > 0.01;
+            })
+            .sort((a, b) => Math.abs(b.difference) - Math.abs(a.difference));
 
         y = this.addSectionTitle(doc, 'Detailed Discrepancies', margin, y);
         doc.setFont('helvetica', 'italic');
         doc.setTextColor(muted[0], muted[1], muted[2]);
-        doc.text('Each variance references the original Excel cell for rapid manager review.', margin, y);
+        doc.text('Variance between reported summary totals and recomputed commission by state.', margin, y);
         y += this.lineHeight + 6;
         doc.setFont('helvetica', 'normal');
         doc.setTextColor(text[0], text[1], text[2]);
@@ -1095,7 +1326,7 @@ const ReportGenerator = {
         const blockPadding = 10;
 
         if (!discrepancies.length) {
-            const message = 'No discrepancies were detected — reported and calculated totals align.';
+            const message = 'No discrepancies were detected — reported and corrected totals align.';
             const messageLines = this.wrapText(doc, message, width);
             const blockHeight = messageLines.length * this.lineHeight + blockPadding * 2;
 
@@ -1118,17 +1349,27 @@ const ReportGenerator = {
             return blockTop + blockHeight + 8;
         }
 
-        discrepancies.slice(0, this.maxDiscrepancyEntries).forEach((discrepancy, index) => {
-            const header = `${index + 1}. Invoice ${discrepancy.invoice || 'N/A'} — ${discrepancy.customer || 'Unknown State'}`;
+        discrepancies.slice(0, this.maxDiscrepancyEntries).forEach((entry, index) => {
+            const header = `${index + 1}. ${entry.state}`;
             const headerLines = this.wrapText(doc, header, width);
-            const commissionType = this.formatCommissionType(discrepancy.commission_type);
-            const diffNumber = this.parseNumber(discrepancy.difference) ?? 0;
 
             const detailEntries = [
-                { text: `Sales Amount: ${this.formatCurrencyValue(discrepancy.sales_amount)} (${commissionType})`, color: 'default' },
-                { text: `Calculated vs Reported: ${this.formatCurrencyValue(discrepancy.my_calculated)} vs ${this.formatCurrencyValue(discrepancy.detail_reported)}`, color: 'default' },
-                { text: `Difference: ${this.formatCurrencyValue(discrepancy.difference)} (${discrepancy.status || 'Status Unknown'})`, color: Math.abs(diffNumber) > 0.01 ? 'error' : 'default' },
-                { text: `Excel Reference: ${this.formatSheetReference(discrepancy)}`, color: 'default' }
+                {
+                    text: `Previously Calculated Commission: ${entry.previous != null && Number.isFinite(entry.previous) ? this.formatCurrencyValue(entry.previous) : 'Not provided'}`,
+                    color: entry.previous != null && Number.isFinite(entry.previous) ? 'default' : 'error'
+                },
+                {
+                    text: `New – Corrected Commission: ${this.formatCurrencyValue(entry.corrected)}`,
+                    color: 'default'
+                },
+                {
+                    text: `Money Owed: ${this.formatCurrencyValue(entry.difference)}`,
+                    color: Math.abs(entry.difference) > 0.01 ? 'error' : 'default'
+                },
+                {
+                    text: entry.summaryFound ? 'Summary data located' : 'Summary data missing',
+                    color: entry.summaryFound ? 'default' : 'error'
+                }
             ];
 
             detailEntries.forEach(item => {
@@ -1151,8 +1392,8 @@ const ReportGenerator = {
             doc.setFont('helvetica', 'bold');
             doc.setTextColor(primary[0], primary[1], primary[2]);
             let lineY = blockTop + blockPadding + this.lineHeight;
-            headerLines.forEach((line, lineIndex) => {
-                doc.text(line, margin, lineY + (lineIndex * this.lineHeight));
+            headerLines.forEach((line, idx) => {
+                doc.text(line, margin, lineY + (idx * this.lineHeight));
             });
 
             let contentY = lineY + headerHeight - this.lineHeight;
@@ -1168,30 +1409,24 @@ const ReportGenerator = {
             });
 
             doc.setTextColor(text[0], text[1], text[2]);
-            y = blockTop + blockHeight + 18;
+            y = blockTop + blockHeight + 12;
         });
 
         if (discrepancies.length > this.maxDiscrepancyEntries) {
             const remaining = discrepancies.length - this.maxDiscrepancyEntries;
-            const notice = `+${remaining} additional discrepancies not shown in this summary.`;
+            const notice = `+${remaining} additional states not shown in this summary.`;
             const noticeLines = this.wrapText(doc, notice, width);
-            const requiredHeight = noticeLines.length * this.lineHeight + 6;
-            y = this.ensureSpace(doc, y, margin, requiredHeight);
-            doc.setFont('helvetica', 'italic');
-            doc.setTextColor(muted[0], muted[1], muted[2]);
-            noticeLines.forEach((line, idx) => {
-                doc.text(line, margin, y + (idx * this.lineHeight));
+            noticeLines.forEach(line => {
+                doc.text(line, margin, y);
+                y += this.lineHeight;
             });
-            doc.setFont('helvetica', 'normal');
-            doc.setTextColor(text[0], text[1], text[2]);
-            y += noticeLines.length * this.lineHeight + 4;
         }
 
         doc.setDrawColor(200, 200, 200);
+        doc.setFont('helvetica', 'normal');
         doc.setTextColor(text[0], text[1], text[2]);
         return y;
     },
-
     addSectionTitle(doc, title, margin, y) {
         const { primary, secondary, accent, text } = this.theme;
         const pageWidth = doc.internal.pageSize.getWidth();
