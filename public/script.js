@@ -442,7 +442,7 @@ const CommissionVerifier = {
             ProgressManager.update(10, 'Preparing file upload...');
 
             const formData = new FormData();
-            formData.append('excelFile', AppState.currentFile);
+            formData.append('files', AppState.currentFile);
 
             ProgressManager.update(30, 'Uploading and processing Excel data...');
 
@@ -459,7 +459,7 @@ const CommissionVerifier = {
                 }
             }, 5000); // Update every 5 seconds
 
-            const response = await fetch('/verify-commission', {
+            const response = await fetch('/api/commission/upload', {
                 method: 'POST',
                 body: formData,
                 signal: controller.signal
