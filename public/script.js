@@ -15,8 +15,10 @@ const countStateDiscrepancies = (comparison) => {
         }
 
         const previous = Number(entry.summaryTotal) || 0;
-        const delta = Number(entry.delta);
-        const difference = Number.isFinite(delta) ? delta : corrected - previous;
+        const delta = entry?.delta;
+        const difference = (typeof delta === 'number' && Number.isFinite(delta))
+            ? delta
+            : corrected - previous;
         return Math.abs(difference) > 0.01 ? count + 1 : count;
     }, 0);
 };
@@ -421,7 +423,8 @@ const ResultsManager = {
             const comparisonEntry = comparisonMap.get(state.state) || {};
             const previous = comparisonEntry.summaryFound ? Number(comparisonEntry.summaryTotal) : null;
             const corrected = Number(state?.totalWithBonus) || 0;
-            let moneyOwed = Number(comparisonEntry.delta);
+            const delta = comparisonEntry?.delta;
+            let moneyOwed = typeof delta === 'number' ? delta : NaN;
 
             if (!Number.isFinite(moneyOwed)) {
                 if (previous != null && Number.isFinite(previous)) {
@@ -497,8 +500,10 @@ const ResultsManager = {
                 return corrected !== 0;
             }
             const previous = Number(entry.summaryTotal) || 0;
-            const delta = Number(entry.delta);
-            const difference = Number.isFinite(delta) ? delta : corrected - previous;
+            const delta = entry?.delta;
+            const difference = (typeof delta === 'number' && Number.isFinite(delta))
+                ? delta
+                : corrected - previous;
             return Math.abs(difference) > 0.01;
         });
 
@@ -521,8 +526,8 @@ const ResultsManager = {
             discrepancies.forEach(entry => {
                 const corrected = Number(entry?.ourTotalWithBonus) || 0;
                 const previous = entry?.summaryFound ? Number(entry.summaryTotal) || 0 : null;
-                const rawDelta = Number(entry?.delta);
-                let difference = Number.isFinite(rawDelta) ? rawDelta : null;
+                const rawDelta = entry?.delta;
+                let difference = (typeof rawDelta === 'number' && Number.isFinite(rawDelta)) ? rawDelta : null;
 
                 if (difference == null) {
                     if (previous != null && Number.isFinite(previous)) {
