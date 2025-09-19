@@ -43,7 +43,7 @@
   "copyright": "© 2025 Adam Gurley. All Rights Reserved.",
   "repository": {
     "type": "git",
-    "url": "private"
+    "url": "git+https://github.com/machine-squelch/ourfloworks.git"
   },
   "security": {
     "features": [
