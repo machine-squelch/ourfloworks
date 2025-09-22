@@ -8,7 +8,6 @@
     
     <!-- Security Meta Tags -->
     <meta http-equiv="X-Content-Type-Options" content="nosniff">
-    <meta http-equiv="X-Frame-Options" content="DENY">
     <meta http-equiv="X-XSS-Protection" content="1; mode=block">
     <meta name="referrer" content="strict-origin-when-cross-origin">
     
@@ -39,16 +38,6 @@
         .container { max-width: 1200px; margin: 0 auto; padding: 16px; }
         @media (min-width: 768px) { .container { padding: 32px; } }
         @media (min-width: 1024px) { .container { padding: 40px; } }
-        
-        /* Turnstile styling */
-        .turnstile-container {
-            display: flex;
-            justify-content: center;
-            margin: 20px 0;
-            padding: 16px;
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 12px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
         }
         
         .security-notice {
@@ -91,6 +80,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     
     <link rel="stylesheet" href="style.css">
+
+    <!-- jsPDF for PDF generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
     <!-- Accessibility announcements -->
@@ -426,9 +418,6 @@
                                 </svg>
                             </span>
                         </button>
-                        <button id="download-csv-btn" class="secondary-button" disabled>
-                            <span class="button-text">📊 Download CSV Data</span>
-                        </button>
                     </div>
                 </div>
             </section>
@@ -461,63 +450,8 @@
         </footer>
     </div>
 
-    <!-- Scripts -->
-    <!-- jsPDF backup CDN for PDF generation -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"
-            integrity="sha512-qZvrmS2ekKPF2mSznTQsxqPgnpkI4DNhh1zj+YCJ8KMRBvV+4hDuGzxu4=="
-            crossorigin="anonymous"
-            referrerpolicy="no-referrer"
-            onerror="console.warn('jsPDF CDN failed, will use dynamic import fallback')"></script>
+    <!-- JavaScript -->
     <script src="script.js"></script>
-    
-    <!-- Turnstile Integration Script -->
-    <script>
-        // Turnstile callback functions
-        window.onTurnstileSuccess = function(token) {
-            console.log('Turnstile verification successful');
-            // Enable the verify button
-            const verifyBtn = document.getElementById('verify-btn');
-            verifyBtn.disabled = false;
-            verifyBtn.setAttribute('data-turnstile-token', token);
-            
-            // Update button description
-            const description = document.getElementById('verify-description');
-            description.textContent = 'Security verified - Ready to process commission data';
-        };
-        
-        window.onTurnstileError = function(error) {
-            console.error('Turnstile verification failed:', error);
-            // Keep verify button disabled
-            const verifyBtn = document.getElementById('verify-btn');
-            verifyBtn.disabled = true;
-            
-            // Show error message
-            const description = document.getElementById('verify-description');
-            description.textContent = 'Security verification failed - Please refresh and try again';
-        };
-        
-        // Show Turnstile when file is uploaded
-        document.addEventListener('DOMContentLoaded', function() {
-            const fileInput = document.getElementById('file-input');
-            const turnstileContainer = document.getElementById('turnstile-container');
-            const securityNotice = document.getElementById('security-notice');
-
-            if (!fileInput) {
-                console.warn('Turnstile initialization skipped: file input element not found.');
-                return;
-            }
-
-            fileInput.addEventListener('change', function() {
-                if (!turnstileContainer || !securityNotice) {
-                    return;
-                }
-
-                const shouldShowTurnstile = this.files.length > 0;
-                turnstileContainer.style.display = shouldShowTurnstile ? 'flex' : 'none';
-                securityNotice.style.display = shouldShowTurnstile ? 'block' : 'none';
-            });
-        });
-    </script>
 </body>
 </html>
 

@@ -247,9 +247,7 @@ const ResultsManager = {
 
         // Enable download buttons
         const pdfBtn = document.getElementById('download-pdf-btn');
-        const csvBtn = document.getElementById('download-csv-btn');
         if (pdfBtn) pdfBtn.disabled = false;
-        if (csvBtn) csvBtn.disabled = false;
 
         const section = document.getElementById('results-section');
         if (section) {
@@ -925,47 +923,6 @@ const CommissionProcessor = {
     }
 };
 
-// CSV Download Manager
-const CSVDownloadManager = {
-    download() {
-        if (!AppState.results) return;
-
-        try {
-            // Use the same format as the server's download-report endpoint
-            fetch('/download-report', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    reportData: AppState.results
-                })
-            })
-            .then(response => {
-                if (!response.ok) throw new Error('Download failed');
-                return response.blob();
-            })
-            .then(blob => {
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-                a.download = `commission_verification_${timestamp}.csv`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                window.URL.revokeObjectURL(url);
-            })
-            .catch(error => {
-                console.error('CSV download failed:', error);
-                alert('CSV download failed. Please try again.');
-            });
-        } catch (error) {
-            console.error('CSV download error:', error);
-            alert('CSV download failed. Please try again.');
-        }
-    }
-};
 
 // Time Display Manager
 const TimeManager = {
@@ -1005,10 +962,6 @@ document.addEventListener('DOMContentLoaded', function() {
         pdfBtn.addEventListener('click', PDFGenerator.generateReport.bind(PDFGenerator));
     }
 
-    const csvBtn = document.getElementById('download-csv-btn');
-    if (csvBtn) {
-        csvBtn.addEventListener('click', CSVDownloadManager.download.bind(CSVDownloadManager));
-    }
 
     // Set up verify button state management
     const verifyButton = document.getElementById('verify-btn');
