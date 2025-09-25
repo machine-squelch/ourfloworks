@@ -1,572 +1,394 @@
 const express = require('express');
+const cors = require('cors');
 const multer = require('multer');
-const xlsx = require('xlsx');
+const fs = require('fs');
 const path = require('path');
-const PDFDocument = require('pdfkit');
+const xlsx = require('xlsx');
+const ExcelJS = require('exceljs');
 
 const app = express();
-const port = 8080;
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// Multer configuration for file uploads
-const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        cb(null, 'uploads/');
+const ROOT = process.cwd();
+const UPLOAD_DIR = path.join(ROOT, 'uploads');
+const REPORT_DIR = path.join(ROOT, 'reports');
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+fs.mkdirSync(REPORT_DIR, { recursive: true });
+
+const upload = multer({ dest: UPLOAD_DIR });
+
+const BASE_RATES = [
+  { min: 0, max: 9999, repeat: 0.02, new: 0.03 },
+  { min: 10000, max: 49999, repeat: 0.01, new: 0.02 },
+  { min: 50000, max: Infinity, repeat: 0.005, new: 0.015 }
+];
+
+const BONUS = [
+  { min: 10000, max: 49999, bonus: 100 },
+  { min: 50000, max: Infinity, bonus: 300 }
+];
+
+const DEFAULT_INCENTIVE = 0.03;
+
+function pickTier(total) {
+  return BASE_RATES.find(tier => total >= tier.min && total <= tier.max);
+}
+
+function pickBonus(total) {
+  const tierBonus = BONUS.find(item => total >= item.min && total <= item.max);
+  return tierBonus ? tierBonus.bonus : 0;
+}
+
+function normalizeHeader(header) {
+  return String(header || '')
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function mapRow(row) {
+  const normalized = {};
+  Object.entries(row).forEach(([key, value]) => {
+    normalized[normalizeHeader(key)] = value;
+  });
+
+  const state =
+    normalized.state ||
+    normalized.billingstate ||
+    normalized.shipstate ||
+    normalized.st ||
+    normalized.region;
+
+  const subtotalRaw =
+    normalized.linesubtotal ||
+    normalized.subtotal ||
+    normalized.amount ||
+    normalized.extendedprice ||
+    normalized.total;
+
+  const typeRaw = normalized.purchasetype || normalized.type || normalized.newrepeat || normalized.isnew;
+
+  const incentiveFlag =
+    normalized.isincentivized ||
+    normalized.incentivized ||
+    normalized.incentive ||
+    normalized.onincentivelist;
+
+  const incentiveRate =
+    normalized.incentiverateoverride ||
+    normalized.incentrate ||
+    normalized.incentiverate;
+
+  const lineSubtotal = Number(subtotalRaw) || 0;
+  let purchaseType = String(typeRaw ?? '').toLowerCase();
+  if (purchaseType === 'true' || purchaseType === 'yes' || purchaseType === '1') purchaseType = 'new';
+  if (purchaseType === 'false' || purchaseType === 'no' || purchaseType === '0') purchaseType = 'repeat';
+  if (!['new', 'repeat'].includes(purchaseType)) {
+    const isNew = String(typeRaw ?? '').toLowerCase() === 'new' || Boolean(normalized.isnew);
+    purchaseType = isNew ? 'new' : 'repeat';
+  }
+
+  const isIncentivized = String(incentiveFlag ?? '').toLowerCase() === 'true' || Boolean(incentiveFlag);
+  const incentiveRateOverride = incentiveRate != null && incentiveRate !== '' ? Number(incentiveRate) : null;
+
+  return {
+    state: String(state || '').trim(),
+    lineSubtotal,
+    purchaseType,
+    isIncentivized,
+    incentiveRateOverride
+  };
+}
+
+function readWorkbook(filePath) {
+  const workbook = xlsx.readFile(filePath);
+  const sheetNames = workbook.SheetNames.map(name => ({ raw: name, norm: name.toLowerCase() }));
+  const detailsName = sheetNames.find(sheet => sheet.norm.includes('detail'))?.raw || sheetNames[0]?.raw;
+  const summaryName = sheetNames.find(sheet => sheet.norm.includes('summary'))?.raw;
+
+  const detailsRows = detailsName ? xlsx.utils.sheet_to_json(workbook.Sheets[detailsName]) : [];
+  const summaryRows = summaryName ? xlsx.utils.sheet_to_json(workbook.Sheets[summaryName]) : [];
+
+  return { detailsRows, summaryRows };
+}
+
+function computeFromDetails(detailsRows) {
+  const mapped = detailsRows.map(mapRow).filter(row => row.state && row.lineSubtotal > 0);
+  const byState = new Map();
+
+  mapped.forEach(row => {
+    if (!byState.has(row.state)) {
+      byState.set(row.state, { lines: [], totalSales: 0 });
+    }
+    const entry = byState.get(row.state);
+    entry.lines.push(row);
+    entry.totalSales += row.lineSubtotal;
+  });
+
+  const stateResults = [];
+
+  byState.forEach((data, state) => {
+    const tier = pickTier(data.totalSales);
+    const bonus = pickBonus(data.totalSales);
+    let stateCommission = 0;
+
+    const lines = data.lines.map(line => {
+      let rate = 0;
+      if (line.isIncentivized) {
+        rate = line.incentiveRateOverride ?? DEFAULT_INCENTIVE;
+      } else {
+        rate = tier[line.purchaseType];
+      }
+      const commission = line.lineSubtotal * rate;
+      stateCommission += commission;
+      return {
+        state,
+        lineSubtotal: line.lineSubtotal,
+        purchaseType: line.purchaseType,
+        isIncentivized: line.isIncentivized,
+        appliedRate: rate,
+        commission
+      };
+    });
+
+    stateResults.push({
+      state,
+      totalSales: data.totalSales,
+      commission: stateCommission,
+      stateBonus: bonus,
+      totalWithBonus: stateCommission + bonus,
+      lines
+    });
+  });
+
+  const grandTotals = stateResults.reduce(
+    (totals, state) => {
+      totals.totalSales += state.totalSales;
+      totals.commission += state.commission;
+      totals.stateBonus += state.stateBonus;
+      totals.totalWithBonus += state.totalWithBonus;
+      return totals;
     },
-    filename: function (req, file, cb) {
-        cb(null, Date.now() + '-' + file.originalname);
-    }
-});
-const upload = multer({ storage: storage });
+    { totalSales: 0, commission: 0, stateBonus: 0, totalWithBonus: 0 }
+  );
 
-// Ensure uploads directory exists
-const fs = require('fs');
-if (!fs.existsSync('uploads')) {
-    fs.mkdirSync('uploads');
+  return { states: stateResults, grand: grandTotals };
 }
 
-// Commission rules from PDF
-const COMMISSION_RULES = {
-    tier1: { min: 0, max: 9999, repeat: 0.02, newProduct: 0.03, bonus: 0 },
-    tier2: { min: 10000, max: 49999, repeat: 0.01, newProduct: 0.02, bonus: 100 },
-    tier3: { min: 50000, max: Infinity, repeat: 0.005, newProduct: 0.015, bonus: 300 }
-};
+function compareAgainstSummary(summaryRows, recomputedStates) {
+  if (!summaryRows || summaryRows.length === 0) {
+    return [];
+  }
 
-const INCENTIVE_RATE = 0.03; // Fixed 3%+ for incentivized SKUs
+  const normalizedRows = summaryRows.map(row => {
+    const normalized = {};
+    Object.entries(row).forEach(([key, value]) => {
+      normalized[normalizeHeader(key)] = value;
+    });
+    return normalized;
+  });
 
-// Serve static files
-app.use(express.static('public'));
+  return recomputedStates.map(state => {
+    const summaryRow = normalizedRows.find(
+      entry => String(entry.state || entry.region || entry.st).trim() === state.state
+    );
 
-// Commission calculation class
-class CommissionCalculator {
-    constructor() {
-        this.rules = COMMISSION_RULES;
+    if (!summaryRow) {
+      return {
+        state: state.state,
+        summaryFound: false,
+        ourTotalWithBonus: state.totalWithBonus,
+        delta: null
+      };
     }
 
-    // Determine tier based on state's monthly sales
-    getStateTier(stateSales) {
-        if (stateSales <= this.rules.tier1.max) return 'tier1';
-        if (stateSales <= this.rules.tier2.max) return 'tier2';
-        return 'tier3';
-    }
-
-    // Process Excel file and analyze commission structure
-    processExcelFile(filePath) {
-        console.log(`\n=== PROCESSING: ${path.basename(filePath)} ===`);
-
-        const workbook = xlsx.readFile(filePath);
-        const sheetNames = workbook.SheetNames;
-
-        console.log('Available sheets:', sheetNames);
-
-        // Try to identify Summary and Details sheets
-        const summarySheet = this.findSummarySheet(workbook, sheetNames);
-        const detailsSheet = this.findDetailsSheet(workbook, sheetNames);
-
-        if (!summarySheet || !detailsSheet) {
-            console.log('Could not identify Summary and/or Details sheets');
-            return null;
-        }
-
-        console.log(`Using Summary: "${summarySheet}", Details: "${detailsSheet}"`);
-
-        // Process both sheets
-        const summaryData = this.processSummarySheet(workbook.Sheets[summarySheet]);
-        const detailsData = this.processDetailsSheet(workbook.Sheets[detailsSheet]);
-
-        // Calculate what should have been paid
-        const calculatedCommission = this.calculateCorrectCommission(detailsData);
-
-        // Compare with what was actually paid
-        const comparison = {
-            file: path.basename(filePath),
-            dlPaid: summaryData.totalPaid,
-            shouldPay: calculatedCommission.total,
-            difference: calculatedCommission.total - summaryData.totalPaid,
-            breakdown: calculatedCommission.breakdown,
-            stateAnalysis: calculatedCommission.stateAnalysis
-        };
-
-        console.log('\n--- RESULTS ---');
-        console.log(`DL Paid You: $${summaryData.totalPaid.toFixed(2)}`);
-        console.log(`Should Pay You: $${calculatedCommission.total.toFixed(2)}`);
-        console.log(`They Owe You: $${comparison.difference.toFixed(2)}`);
-
-        return comparison;
-    }
-
-    // Find the summary sheet (various possible names)
-    findSummarySheet(workbook, sheetNames) {
-        const possibleNames = ['SUMMARY', 'Summary', 'Sheet1', 'summary'];
-        return sheetNames.find(name => possibleNames.includes(name)) || sheetNames[0];
-    }
-
-    // Find the details sheet (various possible names)
-    findDetailsSheet(workbook, sheetNames) {
-        const possibleNames = ['DETAIL', 'DETAILS', 'Details', 'Sheet2', 'detail', 'details'];
-        return sheetNames.find(name => possibleNames.includes(name)) || sheetNames[1];
-    }
-
-    // Process summary sheet to find what DL paid
-    processSummarySheet(worksheet) {
-        const data = xlsx.utils.sheet_to_json(worksheet, { header: 1 });
-
-        console.log('\n--- ANALYZING SUMMARY SHEET ---');
-        console.log(`Summary sheet has ${data.length} rows`);
-
-        let totalPaid = 0;
-
-        // Look for commission-related values (this will need refinement based on actual data)
-        for (let i = 0; i < data.length; i++) {
-            for (let j = 0; j < (data[i] || []).length; j++) {
-                const cell = data[i][j];
-                if (typeof cell === 'number' && cell > 100 && cell < 10000) {
-                    // Potential commission value - this logic needs refinement
-                    console.log(`Potential commission value: $${cell} at row ${i+1}, col ${j+1}`);
-                    if (cell > totalPaid) {
-                        totalPaid = cell; // Take the largest reasonable value for now
-                    }
-                }
-            }
-        }
-
-        console.log(`Detected DL paid amount: $${totalPaid}`);
-        return { totalPaid };
-    }
-
-    // Process details sheet to get transaction data
-    processDetailsSheet(worksheet) {
-        const jsonData = xlsx.utils.sheet_to_json(worksheet);
-
-        console.log('\n--- ANALYZING DETAILS SHEET ---');
-        console.log(`Details sheet has ${jsonData.length} rows`);
-
-        if (jsonData.length === 0) {
-            console.log('No data in details sheet');
-            return { transactions: [] };
-        }
-
-        console.log('Column headers:', Object.keys(jsonData[0]));
-
-        // Process each transaction
-        const transactions = jsonData.map(row => {
-            return this.parseTransactionRow(row);
-        }).filter(t => t !== null);
-
-        console.log(`Processed ${transactions.length} valid transactions`);
-        return { transactions };
-    }
-
-    // Parse individual transaction row
-    parseTransactionRow(row) {
-        // This will need to be flexible for different column names
-        // Common variations: State, BillToState, ShipToState, etc.
-
-        const state = row.State || row.BillToState || row.ShipToState || row['Ship To State'];
-        const revenue = row.Revenue || row['Total Revenue'] || row['Total Discounted Revenue'];
-
-        // Determine transaction type (repeat, new, incentive)
-        const isRepeat = row['Repeat Commission'] || row['Repeat Product Commission'];
-        const isNew = row['New Commission'] || row['New Product Commission'];
-        const isIncentive = row['Incentive Commission'] || row['Incentivized'];
-
-        if (!state || !revenue) {
-            return null; // Skip invalid rows
-        }
-
-        let type = 'repeat'; // default
-        if (isNew > 0) type = 'new';
-        if (isIncentive > 0) type = 'incentive';
-
-        return {
-            state: state,
-            revenue: parseFloat(revenue) || 0,
-            type: type
-        };
-    }
-
-    // Calculate correct commission based on PDF rules
-    calculateCorrectCommission(detailsData) {
-        const { transactions } = detailsData;
-
-        console.log('\n--- CALCULATING CORRECT COMMISSION ---');
-
-        // Group transactions by state
-        const stateData = {};
-
-        transactions.forEach(transaction => {
-            if (!stateData[transaction.state]) {
-                stateData[transaction.state] = {
-                    totalRevenue: 0,
-                    repeatRevenue: 0,
-                    newRevenue: 0,
-                    incentiveRevenue: 0
-                };
-            }
-
-            stateData[transaction.state].totalRevenue += transaction.revenue;
-            stateData[transaction.state][`${transaction.type}Revenue`] += transaction.revenue;
-        });
-
-        let totalCommission = 0;
-        let totalBonuses = 0;
-        const stateAnalysis = [];
-        const breakdown = { repeat: 0, new: 0, incentive: 0, bonuses: 0 };
-
-        // Calculate commission for each state
-        Object.keys(stateData).forEach(state => {
-            const data = stateData[state];
-            const tier = this.getStateTier(data.totalRevenue);
-            const rates = this.rules[tier];
-
-            // Calculate commissions by type
-            const repeatComm = data.repeatRevenue * rates.repeat;
-            const newComm = data.newRevenue * rates.newProduct;
-            const incentiveComm = data.incentiveRevenue * INCENTIVE_RATE;
-            const stateBonus = rates.bonus;
-
-            const stateTotal = repeatComm + newComm + incentiveComm + stateBonus;
-
-            console.log(`${state}: $${data.totalRevenue.toFixed(2)} → ${tier} → $${stateTotal.toFixed(2)} (+ $${stateBonus} bonus)`);
-
-            totalCommission += repeatComm + newComm + incentiveComm;
-            totalBonuses += stateBonus;
-
-            breakdown.repeat += repeatComm;
-            breakdown.new += newComm;
-            breakdown.incentive += incentiveComm;
-            breakdown.bonuses += stateBonus;
-
-            stateAnalysis.push({
-                state,
-                revenue: data.totalRevenue,
-                tier,
-                commission: stateTotal,
-                bonus: stateBonus
-            });
-        });
-
-        return {
-            total: totalCommission + totalBonuses,
-            breakdown,
-            stateAnalysis
-        };
-    }
-
-    // Generate PDF report with dashboard-style formatting
-    generatePDFReport(data, res) {
-        const doc = new PDFDocument({
-            size: 'A4',
-            margins: { top: 40, bottom: 40, left: 40, right: 40 }
-        });
-
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `attachment; filename=Commission_Report_${data.file}.pdf`);
-        doc.pipe(res);
-
-        // Background
-        doc.fillColor('#f8f9fa')
-           .rect(0, 0, 595, 842)
-           .fill();
-
-        // Header with DL logo and title
-        try {
-            doc.image(path.join(__dirname, 'public', 'dllogoonly.png'), 50, 50, { width: 60, height: 60 });
-        } catch (e) {
-            // Fallback if logo not found
-            this.drawSimpleLogo(doc, 50, 50);
-        }
-
-        doc.fontSize(26)
-           .fillColor('#2d3748')
-           .font('Helvetica-Bold')
-           .text('Commission Analysis', 130, 55);
-
-        doc.fontSize(14)
-           .fillColor('#4a5568')
-           .font('Helvetica')
-           .text(`File: ${data.file}`, 130, 85)
-           .text(`Generated: ${new Date().toLocaleDateString()}`, 130, 100);
-
-        let yPos = 140;
-
-        // Top metric cards row
-        const cardWidth = 120;
-        const cardHeight = 80;
-        const cardSpacing = 15;
-
-        // Card 1: DL Paid
-        this.drawDashboardCard(doc, 50, yPos, cardWidth, cardHeight, '#ffffff', '#3182ce');
-        doc.fontSize(11)
-           .fillColor('#4a5568')
-           .text('DL Paid You', 55, yPos + 15);
-        doc.fontSize(20)
-           .fillColor('#3182ce')
-           .font('Helvetica-Bold')
-           .text(`$${data.dlPaid.toFixed(0)}`, 55, yPos + 35);
-
-        // Card 2: Should Pay
-        this.drawDashboardCard(doc, 50 + cardWidth + cardSpacing, yPos, cardWidth, cardHeight, '#ffffff', '#38a169');
-        doc.fontSize(11)
-           .fillColor('#4a5568')
-           .font('Helvetica')
-           .text('Should Pay', 55 + cardWidth + cardSpacing, yPos + 15);
-        doc.fontSize(20)
-           .fillColor('#38a169')
-           .font('Helvetica-Bold')
-           .text(`$${data.shouldPay.toFixed(0)}`, 55 + cardWidth + cardSpacing, yPos + 35);
-
-        // Card 3: Difference
-        const diffColor = data.difference > 0 ? '#38a169' : '#3182ce';
-        this.drawDashboardCard(doc, 50 + 2 * (cardWidth + cardSpacing), yPos, cardWidth, cardHeight, '#ffffff', diffColor);
-        doc.fontSize(11)
-           .fillColor('#4a5568')
-           .font('Helvetica')
-           .text('They Owe', 55 + 2 * (cardWidth + cardSpacing), yPos + 15);
-        doc.fontSize(20)
-           .fillColor(diffColor)
-           .font('Helvetica-Bold')
-           .text(`$${Math.abs(data.difference).toFixed(0)}`, 55 + 2 * (cardWidth + cardSpacing), yPos + 35);
-
-        // Card 4: States
-        this.drawDashboardCard(doc, 50 + 3 * (cardWidth + cardSpacing), yPos, cardWidth, cardHeight, '#ffffff', '#3182ce');
-        doc.fontSize(11)
-           .fillColor('#4a5568')
-           .font('Helvetica')
-           .text('States', 55 + 3 * (cardWidth + cardSpacing), yPos + 15);
-        doc.fontSize(20)
-           .fillColor('#3182ce')
-           .font('Helvetica-Bold')
-           .text(`${data.stateAnalysis.length}`, 55 + 3 * (cardWidth + cardSpacing), yPos + 35);
-
-        yPos += cardHeight + 30;
-
-        // Commission breakdown section
-        this.drawDashboardCard(doc, 50, yPos, 240, 140, '#ffffff', '#e2e8f0');
-        doc.fontSize(16)
-           .fillColor('#2d3748')
-           .font('Helvetica-Bold')
-           .text('Commission Breakdown', 60, yPos + 15);
-
-        const breakdownItems = [
-            { label: 'Repeat Sales', value: data.breakdown.repeat, color: '#38a169' },
-            { label: 'New Product', value: data.breakdown.new, color: '#3182ce' },
-            { label: 'Incentives', value: data.breakdown.incentive, color: '#38a169' },
-            { label: 'State Bonuses', value: data.breakdown.bonuses, color: '#3182ce' }
-        ];
-
-        breakdownItems.forEach((item, index) => {
-            const itemY = yPos + 40 + (index * 22);
-
-            // Color bar
-            doc.fillColor(item.color)
-               .rect(60, itemY + 2, 15, 12)
-               .fill();
-
-            doc.fontSize(11)
-               .fillColor('#4a5568')
-               .font('Helvetica')
-               .text(item.label, 85, itemY + 4);
-
-            doc.fontSize(12)
-               .fillColor('#2d3748')
-               .font('Helvetica-Bold')
-               .text(`$${item.value.toFixed(0)}`, 200, itemY + 4);
-        });
-
-        // State analysis chart
-        this.drawDashboardCard(doc, 310, yPos, 245, 140, '#ffffff', '#e2e8f0');
-        doc.fontSize(16)
-           .fillColor('#2d3748')
-           .font('Helvetica-Bold')
-           .text('State Performance', 320, yPos + 15);
-
-        yPos += 180;
-
-        // State details table
-        this.drawDashboardCard(doc, 50, yPos, 505, 25 + (data.stateAnalysis.length * 20), '#ffffff', '#e2e8f0');
-
-        // Table header
-        doc.fillColor('#f7fafc')
-           .rect(60, yPos + 10, 485, 25)
-           .fill();
-
-        doc.fontSize(11)
-           .fillColor('#4a5568')
-           .font('Helvetica-Bold')
-           .text('STATE', 70, yPos + 20)
-           .text('REVENUE', 140, yPos + 20)
-           .text('TIER', 220, yPos + 20)
-           .text('COMMISSION', 280, yPos + 20)
-           .text('BONUS', 370, yPos + 20)
-           .text('TOTAL', 430, yPos + 20);
-
-        // Table rows
-        data.stateAnalysis.forEach((state, index) => {
-            const rowY = yPos + 35 + (index * 20);
-            const rowColor = index % 2 === 0 ? '#ffffff' : '#f8f9fa';
-
-            doc.fillColor(rowColor)
-               .rect(60, rowY, 485, 20)
-               .fill();
-
-            const tierColor = state.tier === 'tier1' ? '#3182ce' : state.tier === 'tier2' ? '#38a169' : '#38a169';
-
-            doc.fontSize(10)
-               .fillColor('#2d3748')
-               .font('Helvetica')
-               .text(state.state, 70, rowY + 6)
-               .text(`$${state.revenue.toFixed(0)}`, 140, rowY + 6)
-               .fillColor(tierColor)
-               .text(state.tier.toUpperCase(), 220, rowY + 6)
-               .fillColor('#2d3748')
-               .text(`$${(state.commission - state.bonus).toFixed(0)}`, 280, rowY + 6)
-               .text(`$${state.bonus}`, 370, rowY + 6)
-               .fillColor('#38a169')
-               .font('Helvetica-Bold')
-               .text(`$${state.commission.toFixed(0)}`, 430, rowY + 6);
-        });
-
-        // Footer
-        doc.fontSize(9)
-           .fillColor('#a0aec0')
-           .font('Helvetica')
-           .text('Generated by Commission Analysis Engine • Based on DL Wholesale Agreement', 50, 800, { align: 'center', width: 505 });
-
-        doc.end();
-    }
-
-    // Draw simple logo fallback (if DL logo not found)
-    drawSimpleLogo(doc, x, y) {
-        const size = 60;
-
-        // Main circle background (blue)
-        doc.fillColor('#3182ce')
-           .circle(x + size/2, y + size/2, size/2)
-           .fill();
-
-        // Inner circle (white)
-        doc.fillColor('#ffffff')
-           .circle(x + size/2, y + size/2, size/2 - 8)
-           .fill();
-
-        // DL text
-        doc.fillColor('#3182ce')
-           .fontSize(20)
-           .font('Helvetica-Bold')
-           .text('DL', x + size/2 - 12, y + size/2 - 8);
-    }
-
-    // Draw dashboard-style card with shadow
-    drawDashboardCard(doc, x, y, width, height, fillColor, accentColor) {
-        // Shadow
-        doc.fillColor('#e2e8f0')
-           .roundedRect(x + 2, y + 2, width, height, 8)
-           .fill();
-
-        // Main card
-        doc.fillColor(fillColor)
-           .roundedRect(x, y, width, height, 8)
-           .fill();
-
-        // Accent line at top
-        doc.fillColor(accentColor)
-           .roundedRect(x, y, width, 4, 8)
-           .fill();
-
-        // Subtle border
-        doc.strokeColor('#e2e8f0')
-           .lineWidth(1)
-           .roundedRect(x, y, width, height, 8)
-           .stroke();
-    }
+    const summaryTotal =
+      Number(
+        summaryRow.totalwithbonus ||
+          summaryRow.total ||
+          summaryRow.commissiontotal ||
+          summaryRow.paid ||
+          summaryRow.amount
+      ) || 0;
+
+    return {
+      state: state.state,
+      summaryFound: true,
+      summaryTotal,
+      ourTotalWithBonus: state.totalWithBonus,
+      delta: Number((state.totalWithBonus - summaryTotal).toFixed(2))
+    };
+  });
 }
 
-// API endpoint to process a single Excel file
-app.post('/analyze', upload.single('excelFile'), (req, res) => {
-    try {
-        if (!req.file) {
-            return res.status(400).json({ error: 'No file uploaded' });
-        }
+async function writePerFileReport(fileBase, recompute, comparisons) {
+  const workbook = new ExcelJS.Workbook();
 
-        const calculator = new CommissionCalculator();
-        const result = calculator.processExcelFile(req.file.path);
+  const detailsSheet = workbook.addWorksheet('Details Recalc');
+  detailsSheet.columns = [
+    { header: 'State', key: 'state', width: 12 },
+    { header: 'LineSubtotal', key: 'lineSubtotal', width: 14 },
+    { header: 'PurchaseType', key: 'purchaseType', width: 12 },
+    { header: 'IsIncentivized', key: 'isIncentivized', width: 14 },
+    { header: 'AppliedRate', key: 'appliedRate', width: 12 },
+    { header: 'Commission', key: 'commission', width: 14 }
+  ];
+  recompute.states.forEach(state => {
+    state.lines.forEach(line => {
+      detailsSheet.addRow({
+        state: line.state,
+        lineSubtotal: Number(line.lineSubtotal.toFixed(2)),
+        purchaseType: line.purchaseType,
+        isIncentivized: line.isIncentivized,
+        appliedRate: Number(line.appliedRate.toFixed(6)),
+        commission: Number(line.commission.toFixed(2))
+      });
+    });
+  });
 
-        if (!result) {
-            return res.status(400).json({ error: 'Could not process Excel file' });
-        }
+  const statesSheet = workbook.addWorksheet('State Totals');
+  statesSheet.columns = [
+    { header: 'State', key: 'state', width: 12 },
+    { header: 'TotalSales', key: 'totalSales', width: 14 },
+    { header: 'Commission', key: 'commission', width: 14 },
+    { header: 'StateBonus', key: 'stateBonus', width: 12 },
+    { header: 'TotalWithBonus', key: 'totalWithBonus', width: 16 }
+  ];
+  recompute.states.forEach(state => {
+    statesSheet.addRow({
+      state: state.state,
+      totalSales: Number(state.totalSales.toFixed(2)),
+      commission: Number(state.commission.toFixed(2)),
+      stateBonus: Number(state.stateBonus.toFixed(2)),
+      totalWithBonus: Number(state.totalWithBonus.toFixed(2))
+    });
+  });
 
-        // Clean up uploaded file
-        fs.unlinkSync(req.file.path);
+  const compareSheet = workbook.addWorksheet('Summary Compare');
+  compareSheet.columns = [
+    { header: 'State', key: 'state', width: 12 },
+    { header: 'SummaryFound', key: 'summaryFound', width: 14 },
+    { header: 'SummaryTotal', key: 'summaryTotal', width: 14 },
+    { header: 'OurTotalWithBonus', key: 'ourTotalWithBonus', width: 18 },
+    { header: 'Delta(Our - Summary)', key: 'delta', width: 18 }
+  ];
+  comparisons.forEach(entry => {
+    compareSheet.addRow({
+      state: entry.state,
+      summaryFound: entry.summaryFound,
+      summaryTotal: entry.summaryTotal != null ? Number(entry.summaryTotal.toFixed(2)) : null,
+      ourTotalWithBonus: Number(entry.ourTotalWithBonus.toFixed(2)),
+      delta: entry.delta != null ? Number(entry.delta.toFixed(2)) : null
+    });
+  });
 
-        res.json(result);
-    } catch (error) {
-        console.error('Error processing file:', error);
-        res.status(500).json({ error: 'Internal server error' });
+  const outPath = path.join(REPORT_DIR, `${fileBase}-recalc.xlsx`);
+  await workbook.xlsx.writeFile(outPath);
+  return outPath;
+}
+
+async function writeTotalSummaryReport(aggregate) {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('Total Summary');
+  sheet.columns = [
+    { header: 'State', key: 'state', width: 12 },
+    { header: 'TotalSales', key: 'totalSales', width: 14 },
+    { header: 'Commission', key: 'commission', width: 14 },
+    { header: 'StateBonus', key: 'stateBonus', width: 12 },
+    { header: 'TotalWithBonus', key: 'totalWithBonus', width: 16 }
+  ];
+  (aggregate.states || []).forEach(state => {
+    sheet.addRow({
+      state: state.state,
+      totalSales: Number(state.totalSales.toFixed(2)),
+      commission: Number(state.commission.toFixed(2)),
+      stateBonus: Number(state.stateBonus.toFixed(2)),
+      totalWithBonus: Number(state.totalWithBonus.toFixed(2))
+    });
+  });
+
+  const outPath = path.join(REPORT_DIR, 'Total Summary.xlsx');
+  await workbook.xlsx.writeFile(outPath);
+  return outPath;
+}
+
+app.use(express.static(path.join(ROOT, 'public')));
+
+app.post('/api/commission/upload', upload.array('files', 20), async (req, res) => {
+  try {
+    const files = req.files || [];
+    if (!files.length) {
+      return res.status(400).json({ error: 'No files uploaded' });
     }
+
+    const perFile = [];
+    const totalStatesMap = new Map();
+
+    for (const file of files) {
+      const fullPath = path.resolve(file.path);
+      const baseName = path.basename(file.originalname, path.extname(file.originalname));
+      const { detailsRows, summaryRows } = readWorkbook(fullPath);
+      const recompute = computeFromDetails(detailsRows);
+      const comparisons = compareAgainstSummary(summaryRows, recompute.states);
+      const reportPath = await writePerFileReport(baseName || 'report', recompute, comparisons);
+
+      recompute.states.forEach(state => {
+        if (!totalStatesMap.has(state.state)) {
+          totalStatesMap.set(state.state, { ...state });
+        } else {
+          const existing = totalStatesMap.get(state.state);
+          existing.totalSales += state.totalSales;
+          existing.commission += state.commission;
+          existing.stateBonus += state.stateBonus;
+          existing.totalWithBonus += state.totalWithBonus;
+          totalStatesMap.set(state.state, existing);
+        }
+      });
+
+      try {
+        fs.unlinkSync(fullPath);
+      } catch (cleanupError) {
+        console.warn('Failed to remove uploaded file', cleanupError);
+      }
+
+      perFile.push({
+        file: file.originalname,
+        result: recompute,
+        comparison: comparisons,
+        reportDownload: `/api/commission/report/${encodeURIComponent(path.basename(reportPath))}`
+      });
+    }
+
+    const totalStates = Array.from(totalStatesMap.values()).sort((a, b) => a.state.localeCompare(b.state));
+    const totalSummaryPath = await writeTotalSummaryReport({ states: totalStates });
+    const totalSummaryDownload = `/api/commission/report/${encodeURIComponent(path.basename(totalSummaryPath))}`;
+
+    return res.json({
+      ok: true,
+      perFile,
+      totalSummaryDownload
+    });
+  } catch (error) {
+    console.error('Commission processing failed', error);
+    return res.status(500).json({ error: 'Processing failed', detail: error.message });
+  }
 });
 
-// Generate PDF report for a specific file
-app.get('/pdf-report/:filename', (req, res) => {
-    try {
-        const filename = req.params.filename;
-        const filePath = path.join(__dirname, 'xlsx files', filename);
-
-        if (!fs.existsSync(filePath)) {
-            return res.status(404).json({ error: 'File not found' });
-        }
-
-        const calculator = new CommissionCalculator();
-        const result = calculator.processExcelFile(filePath);
-
-        if (!result) {
-            return res.status(400).json({ error: 'Could not process Excel file' });
-        }
-
-        calculator.generatePDFReport(result, res);
-    } catch (error) {
-        console.error('Error generating PDF:', error);
-        res.status(500).json({ error: 'Internal server error' });
-    }
+app.get('/api/commission/report/:file', (req, res) => {
+  const filePath = path.join(REPORT_DIR, req.params.file);
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).send('Not found');
+  }
+  res.download(filePath);
 });
 
-// Analyze a specific file from the xlsx files directory
-app.get('/analyze-file/:filename', (req, res) => {
-    try {
-        const filename = req.params.filename;
-        const filePath = path.join(__dirname, 'xlsx files', filename);
-
-        if (!fs.existsSync(filePath)) {
-            return res.status(404).json({ error: 'File not found' });
-        }
-
-        const calculator = new CommissionCalculator();
-        const result = calculator.processExcelFile(filePath);
-
-        if (!result) {
-            return res.status(400).json({ error: 'Could not process Excel file' });
-        }
-
-        res.json(result);
-    } catch (error) {
-        console.error('Error processing file:', error);
-        res.status(500).json({ error: 'Internal server error' });
-    }
+app.get(['/healthz', '/health'], (_req, res) => {
+  res.json({ ok: true });
 });
 
-// List available files
-app.get('/files', (req, res) => {
-    try {
-        const xlsxDir = path.join(__dirname, 'xlsx files');
-        const files = fs.readdirSync(xlsxDir)
-            .filter(file => file.endsWith('.xlsx') && !file.includes('Zone.Identifier'))
-            .sort();
-        res.json(files);
-    } catch (error) {
-        res.status(500).json({ error: 'Could not read files directory' });
-    }
-});
-
-app.listen(port, () => {
-    console.log(`Commission Analysis Server running on port ${port}`);
-    console.log(`Access the application at: http://localhost:${port}`);
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`commission server ready on :${PORT}`);
 });

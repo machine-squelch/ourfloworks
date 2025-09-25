@@ -23,7 +23,6 @@
     "json2csv": "^5.0.7",
     "multer": "^1.4.5-lts.1",
     "node-fetch": "^2.7.0",
-    "pdfkit": "^0.17.2",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
@@ -44,7 +43,7 @@
   "copyright": "© 2025 Adam Gurley. All Rights Reserved.",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/machine-squelch/ourfloworks.git"
+    "url": "private"
   },
   "security": {
     "features": [

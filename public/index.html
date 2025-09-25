@@ -8,6 +8,7 @@
     
     <!-- Security Meta Tags -->
     <meta http-equiv="X-Content-Type-Options" content="nosniff">
+    <meta http-equiv="X-Frame-Options" content="DENY">
     <meta http-equiv="X-XSS-Protection" content="1; mode=block">
     <meta name="referrer" content="strict-origin-when-cross-origin">
     
@@ -38,6 +39,16 @@
         .container { max-width: 1200px; margin: 0 auto; padding: 16px; }
         @media (min-width: 768px) { .container { padding: 32px; } }
         @media (min-width: 1024px) { .container { padding: 40px; } }
+        
+        /* Turnstile styling */
+        .turnstile-container {
+            display: flex;
+            justify-content: center;
+            margin: 20px 0;
+            padding: 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
         
         .security-notice {
@@ -80,9 +91,6 @@
     <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     
     <link rel="stylesheet" href="style.css">
-
-    <!-- jsPDF for PDF generation -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
     <!-- Accessibility announcements -->
@@ -197,7 +205,7 @@
 
             <!-- File upload section -->
             <section class="section upload-section" aria-labelledby="upload-title">
-                <h2 id="upload-title" class="section-title">Upload Commission Data</h2>
+                <h2 id="upload-title" class="section-title">Upload Nick's Report</h2>
                 
                 <div class="upload-container">
                     <div class="upload-dropzone" 
@@ -219,13 +227,13 @@
                             <h3 class="upload-title">Slide in here</h3>
                             <p class="upload-subtitle">or click to browse</p>
                             <div id="upload-instructions" class="upload-instructions">
-                                Upload Excel file with Summary and Detail sheets (.xlsx, .xls - Max 50MB)
+                                Upload Excel file - it just has to have TWO sheets (.xlsx, .xls - Max 50MB)
                             </div>
                         </div>
                         
-                        <input type="file"
-                               id="file-input"
-                               accept=".xlsx,.xls"
+                        <input type="file" 
+                               id="file-input" 
+                               accept=".xlsx,.xls" 
                                class="sr-only"
                                aria-describedby="upload-instructions">
                     </div>
@@ -292,51 +300,35 @@
 
             <!-- Results section -->
             <section id="results-section" class="section results-section hidden" aria-labelledby="results-title">
-                <h2 id="results-title" class="section-title">Abra Kadabra!!!!</h2>
+                <h2 id="results-title" class="section-title">OMARIO!!!</h2>
                 
                 <!-- Summary cards -->
                 <div class="summary-grid">
-                    <div class="summary-card neutral-data">
+                    <div class="summary-card">
                         <div class="card-icon">📊</div>
                         <div class="card-content">
                             <div class="card-value" id="total-transactions">-</div>
                             <div class="card-label">Transactions</div>
                         </div>
                     </div>
-
-                    <div class="summary-card neutral-data">
+                    
+                    <div class="summary-card">
                         <div class="card-icon">🗺️</div>
                         <div class="card-content">
                             <div class="card-value" id="total-states">-</div>
                             <div class="card-label">States</div>
                         </div>
                     </div>
-
-                    <div class="summary-card claude-data">
-                        <div class="card-icon">🧮</div>
+                    
+                    <div class="summary-card">
+                        <div class="card-icon">💰</div>
                         <div class="card-content">
                             <div class="card-value" id="calculated-commission">-</div>
-                            <div class="card-label">Claude Calculated</div>
+                            <div class="card-label">Calculated</div>
                         </div>
                     </div>
-
-                    <div class="summary-card dl-data">
-                        <div class="card-icon">📊</div>
-                        <div class="card-content">
-                            <div class="card-value" id="reported-commission">-</div>
-                            <div class="card-label">DL Reported</div>
-                        </div>
-                    </div>
-
-                    <div class="summary-card difference-data">
-                        <div class="card-icon">🔍</div>
-                        <div class="card-content">
-                            <div class="card-value" id="commission-difference">-</div>
-                            <div class="card-label">Difference</div>
-                        </div>
-                    </div>
-
-                    <div class="summary-card neutral-data">
+                    
+                    <div class="summary-card">
                         <div class="card-icon">✓</div>
                         <div class="card-content">
                             <div class="card-value" id="verification-status">-</div>
@@ -347,7 +339,7 @@
 
                 <!-- Commission breakdown -->
                 <div class="breakdown-section">
-                    <h3 class="subsection-title claude-section">🧮 Claude's Commission Breakdown</h3>
+                    <h3 class="subsection-title">Commission Breakdown</h3>
                     <div class="breakdown-grid">
                         <div class="breakdown-item">
                             <span class="breakdown-label">Repeat Product</span>
@@ -368,57 +360,80 @@
                     </div>
                 </div>
 
-                <!-- Grand Totals Only -->
-                <div class="grand-totals">
-                    <div class="total-row">
-                        <div class="total-label">Total Commission</div>
-                        <div class="dl-total" id="dl-total-commission">DL: $-</div>
-                        <div class="claude-total" id="claude-total-commission">Claude: $-</div>
-                        <div class="difference-total" id="difference-total-commission">Diff: $-</div>
+                <!-- State analysis -->
+                <div class="analysis-section">
+                    <div class="collapsible-header" id="state-header" role="button" tabindex="0" aria-expanded="false" aria-controls="state-content">
+                        <h3 class="subsection-title">State Analysis</h3>
+                        <div class="collapsible-icon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="6,9 12,15 18,9"></polyline>
+                            </svg>
+                        </div>
                     </div>
-                    <div class="total-row">
-                        <div class="total-label">State Bonuses</div>
-                        <div class="dl-total" id="dl-state-bonuses">DL: $-</div>
-                        <div class="claude-total" id="claude-state-bonuses">Claude: $-</div>
-                        <div class="difference-total" id="difference-state-bonuses">Diff: $-</div>
+                    <div class="collapsible-content" id="state-content" aria-labelledby="state-header">
+                        <div class="table-container">
+                            <table class="results-table" id="state-table">
+                                <thead>
+                                    <tr>
+                                        <th>State</th>
+                                        <th>Total Sales</th>
+                                        <th>Tier</th>
+                                        <th>Commission</th>
+                                        <th>Bonus</th>
+                                        <th>Transactions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- State data will be inserted here -->
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
 
-                <!-- Error analysis -->
+                <!-- Discrepancies -->
                 <div class="analysis-section">
-                    <h3 class="subsection-title">🔍 Error Analysis</h3>
-                    <div class="table-container">
-                        <table class="results-table" id="state-table">
-                            <thead>
-                                <tr>
-                                    <th>Issue</th>
-                                    <th class="dl-header">📊 DL Calculated</th>
-                                    <th class="claude-header">🧮 Claude Calculated</th>
-                                    <th>💸 Difference</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <!-- Error analysis data will be inserted here -->
-                            </tbody>
-                        </table>
+                    <div class="collapsible-header" id="discrepancies-header" role="button" tabindex="0" aria-expanded="false" aria-controls="discrepancies-content">
+                        <h3 class="subsection-title">Discrepancies</h3>
+                        <div class="discrepancy-count" id="discrepancy-count">0</div>
+                        <div class="collapsible-icon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="6,9 12,15 18,9"></polyline>
+                            </svg>
+                        </div>
+                    </div>
+                    <div class="collapsible-content" id="discrepancies-content" aria-labelledby="discrepancies-header">
+                        <div class="table-container">
+                            <table class="results-table" id="discrepancies-table">
+                                <thead>
+                                    <tr>
+                                        <th>Invoice</th>
+                                        <th>State</th>
+                                        <th>We Calculated</th>
+                                        <th>Reported by DL</th>
+                                        <th>Difference</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Discrepancy data will be inserted here -->
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
 
                 <!-- Download section -->
                 <div class="download-section">
-                    <div class="download-grid">
-                        <button id="download-pdf-btn" class="primary-button" disabled>
-                            <span class="button-text">📄 Generate PDF Report</span>
-                            <span class="button-loader hidden">
-                                <svg class="spinner" width="20" height="20" viewBox="0 0 24 24">
-                                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none" opacity="0.25"/>
-                                    <path d="M4,12a8,8 0 0,1 16,0" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round">
-                                        <animateTransform attributeName="transform" type="rotate" dur="1s" values="0 12 12;360 12 12" repeatCount="indefinite"/>
-                                    </path>
-                                </svg>
-                            </span>
-                        </button>
-                    </div>
+                    <button id="download-btn" class="secondary-button full-width" disabled>
+                        <span class="button-text">Download Detailed PDF Report</span>
+                        <span class="button-icon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-15"/>
+                                <polyline points="7,10 12,15 17,10"/>
+                                <line x1="12" y1="15" x2="12" y2="3"/>
+                            </svg>
+                        </span>
+                    </button>
                 </div>
             </section>
         </main>
@@ -426,32 +441,77 @@
         <!-- Footer -->
         <footer class="footer" role="contentinfo">
             <div class="footer-content">
-            </div>
-
-            <!-- Centered affiliate graphic -->
-            <div class="footer-banner">
-                <a href="https://www.stickermule.com/unlock?ref_id=7471996701&utm_medium=embed&utm_source=invite&utm_content=250x250" target="_blank">
-                    <img alt="Custom Stickers, Die Cut Stickers, Bumper Stickers - Sticker Mule"
-                         height="250"
-                         src="https://cdn.stickermule.com/content/core/assets/banners/stickermule-invite-friends-square.png"
+                <div class="footer-brand">
+                    <span class="footer-title">Thinkazoo Commission Verifier</span>
+                    <span class="footer-version">v2.1.0</span>
+                </div>
+                          <div class="footer-banner">
+                <span href="https://www.stickermule.com/unlock?ref_id=7471996701&utm_medium=embed&utm_source=invite&utm_content=250x250" target="_blank">
+                    <img alt="Custom Stickers, Die Cut Stickers, Bumper Stickers - Sticker Mule" 
+                         height="250" 
+                         src="https://cdn.stickermule.com/content/core/assets/banners/stickermule-invite-friends-square.png" 
                          width="250" />
-                </a>
+                </span>
             </div>
-
-            <!-- Bottom text centered, one above the other -->
-            <div class="footer-bottom">
-                <div class="footer-security">🔒 Enterprise Security</div>
-                <div class="footer-copyright">© 2025 Adam Gurley. All Rights Reserved.</div>
-
-                <!-- Corner flag images -->
-                <img src="flag-l.png" alt="US Flag" class="footer-flag footer-flag-left">
-                <img src="flag-r.png" alt="US Flag" class="footer-flag footer-flag-right">
+                <div class="footer-meta">
+                    <span class="footer-copyright">© 2025 Adam Gurley. All Rights Reserved.</span>
+                    <span class="footer-security">🔒 Enterprise Security</span>
+                </div>
             </div>
         </footer>
     </div>
 
-    <!-- JavaScript -->
+    <!-- Scripts -->
     <script src="script.js"></script>
+    
+    <!-- Turnstile Integration Script -->
+    <script>
+        // Turnstile callback functions
+        window.onTurnstileSuccess = function(token) {
+            console.log('Turnstile verification successful');
+            // Enable the verify button
+            const verifyBtn = document.getElementById('verify-btn');
+            verifyBtn.disabled = false;
+            verifyBtn.setAttribute('data-turnstile-token', token);
+            
+            // Update button description
+            const description = document.getElementById('verify-description');
+            description.textContent = 'Security verified - Ready to process commission data';
+        };
+        
+        window.onTurnstileError = function(error) {
+            console.error('Turnstile verification failed:', error);
+            // Keep verify button disabled
+            const verifyBtn = document.getElementById('verify-btn');
+            verifyBtn.disabled = true;
+            
+            // Show error message
+            const description = document.getElementById('verify-description');
+            description.textContent = 'Security verification failed - Please refresh and try again';
+        };
+        
+        // Show Turnstile when file is uploaded
+        document.addEventListener('DOMContentLoaded', function() {
+            const fileInput = document.getElementById('file-input');
+            const turnstileContainer = document.getElementById('turnstile-container');
+            const securityNotice = document.getElementById('security-notice');
+
+            if (!fileInput) {
+                console.warn('Turnstile initialization skipped: file input element not found.');
+                return;
+            }
+
+            fileInput.addEventListener('change', function() {
+                if (!turnstileContainer || !securityNotice) {
+                    return;
+                }
+
+                const shouldShowTurnstile = this.files.length > 0;
+                turnstileContainer.style.display = shouldShowTurnstile ? 'flex' : 'none';
+                securityNotice.style.display = shouldShowTurnstile ? 'block' : 'none';
+            });
+        });
+    </script>
 </body>
 </html>
 
